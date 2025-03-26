@@ -21,4 +21,3 @@ OPENAI_API_KEY: irrelevant
 OPENAI_BASE_PATH: /engines/llama.cpp/v1/chat/completions
 OPENAI_HOST: http://model-runner.docker.internal
 GOOSE_PROVIDER: openai
-GOOSE_MODEL: ai/qwen2.5:7B-Q4_K_M
