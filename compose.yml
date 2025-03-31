@@ -6,7 +6,6 @@ services:
     environment:
       - GOOSE_PROVIDER=ollama
       - GOOSE_MODEL=mistral-nemo
-      - OLLAMA_HOST=http://ollama:11434
     depends_on:
       - ollama
    ollama:
