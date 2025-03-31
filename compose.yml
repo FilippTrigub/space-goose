@@ -1,6 +1,6 @@
 services:
    hani:
-    image: olegselajev241/hani:latest
+    image: olegselajev241/hani:0.0.1
     ports:
       - "7681:7681"
     environment:
