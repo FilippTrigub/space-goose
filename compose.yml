@@ -1,0 +1,34 @@
+services:
+   hani:
+    image: olegselajev241/hani:latest
+    ports:
+      - "7681:7681"
+    environment:
+      - GOOSE_PROVIDER=ollama
+      - GOOSE_MODEL=mistral-nemo
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+   ollama:
+     image: ollama/ollama:latest
+     ports:
+       - "11434:11434"
+     environment:
+       - OLLAMA_HOST=0.0.0.0
+     entrypoint: >
+       sh -c "
+         set -ex
+         ollama serve & 
+         sleep 3
+         ollama pull mistral-nemo
+         ps -ef | grep 'ollama serve' | grep -v grep | awk '{print $2}' | xargs -r kill -9
+         sleep 1
+         ollama serve
+       "
+     deploy:
+       resources:
+         reservations:
+           devices:
+             - driver: nvidia
+               count: all
+               capabilities: [gpu]

@@ -1,5 +1,12 @@
-GOOSE_MODE: auto
 extensions:
+  developer:
+    name: developer
+    type: builtin
+    enabled: false
+  memory:
+    name: memory
+    type: builtin
+    enabled: false
   dockeraitoolcatalog:
     args:
     - run
@@ -9,15 +16,15 @@ extensions:
     - STDIO
     - TCP:host.docker.internal:8811
     cmd: docker
-    enabled: true
+  enabled: false
     envs: {}
     name: DockerAIToolCatalog
     timeout: 300
     type: stdio
+GOOSE_MODE: auto
 GOOSE_CLI_MIN_PRIORITY: 0.8
 keyring: false
-
 OPENAI_API_KEY: irrelevant
 OPENAI_BASE_PATH: /engines/llama.cpp/v1/chat/completions
 OPENAI_HOST: http://model-runner.docker.internal
-GOOSE_PROVIDER: openai
+OLLAMA_HOST: http://ollama:11434
