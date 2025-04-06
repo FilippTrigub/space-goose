@@ -1,0 +1,22 @@
+extensions:
+  dockeraitoolcatalog:
+    args:
+    - run
+    - -i
+    - --rm
+    - alpine/socat
+    - STDIO
+    - TCP:host.docker.internal:8811
+    cmd: docker
+    enabled: true
+    envs: {}
+    name: DockerAIToolCatalog
+    timeout: 300
+    type: stdio
+GOOSE_MODE: auto
+GOOSE_CLI_MIN_PRIORITY: 0.8
+keyring: false
+OPENAI_API_KEY: irrelevant
+OPENAI_BASE_PATH: /engines/llama.cpp/v1/chat/completions
+OPENAI_HOST: http://model-runner.docker.internal
+OLLAMA_HOST: http://ollama:11434

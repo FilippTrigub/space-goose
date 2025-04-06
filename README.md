@@ -7,7 +7,7 @@ This project sets up [Goose](https://github.com/block/goose) in a containerized 
 If you have a Docker Desktop with the Model runner installed, you can run it locally: 
 
 ```
-docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -p 7681:7681 olegselajev241/hani
+docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -p 7681:7681 olegselajev241/hani:local
 ```
 
 Override  the default model selection: 

@@ -22,8 +22,9 @@ RUN wget -O /tmp/ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/1
     chmod +x /tmp/ttyd.x86_64 && \
     mv /tmp/ttyd.x86_64 /usr/local/bin/ttyd
 
+ARG SETUP=local
 
-COPY config.yaml /root/.config/goose/config.yaml
+COPY config-${SETUP}.yaml /root/.config/goose/config.yaml
 # Download and install Goose
 RUN wget -qO- https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash && \
     ls -la /root/.local/bin/goose && \
@@ -34,8 +35,8 @@ EXPOSE 7681
 
 # # Configure Docker Model Runner as the default target 
 ENV OPENAI_API_KEY=irrelevant
-ENV GOOSE_PROVIDER=ollama
-ENV GOOSE_MODEL=qwen2.5:7b
+ENV GOOSE_PROVIDER=openai
+ENV GOOSE_MODEL=ai/qwen2.5:7B-Q4_K_M
 
 
 # Set entrypoint to ttyd running goose session
