@@ -17,16 +17,31 @@ docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -p 7681:7681 -e
 
 Prefer tools-aware models, Goose is an MCP client, so giving it access to tools multiplies the usefullness by a lot. 
 
-## Components
+
+# Compose based setup
+
+If you have a Docker environment with GPU, you can run the compose based setup. 
+It uses a Google Maps MCP server, so get your GOOGLE_MAPS_API_KEY, and put it into the `.env` file: 
+
+```
+echo GOOGLE_MAPS_API_KEY="changeme" > .env
+```
+
+Then spin up the compose: 
+```
+docker compose up
+```
+
+# Cloud run based setup
+
+You can also deploy it to Google Cloud Run. The project setup is a bit involved, you need a GPU quota, a VPC and the secret with the Maps API KEY, but you can check an example of the deployment descriptor in `service.yaml`. 
+
+
+## Components of the Hani Docker Image
 
 - **Goose**: Main application
 - **ttyd**: Web terminal interface
 - **Docker CLI**: For running socat container to access AI Tools catalog
-
-## Getting Started
-
-### Prerequisites
-- Docker
 
 ### Setup
 
@@ -36,16 +51,15 @@ Prefer tools-aware models, Goose is an MCP client, so giving it access to tools 
    cd hani
    ```
 
-2. Build and run the container (sets Docker context to default, because it maps socket into container to run other containers)
+2. Build all the container flavors: 
    ```
    ./build.sh
    ```
-3. Open Goose session in the browser: [http://localhost:7681](http://localhost:7681)
 
-## Customization
+3  Run the container locally: 
+   ```
+   docker run -it --rm -v /var/run/docker.sock:/var/run/docker.sock -p 7681:7681 olegselajev241/hani:local
+   ```
 
-To customize the Goose container, modify the `Dockerfile` and rebuild:
+4. Open Goose session in the browser: [http://localhost:7681](http://localhost:7681)
 
-```
-./build.sh
-``` 
