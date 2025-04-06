@@ -2,8 +2,6 @@
 
 This project sets up [Goose](https://github.com/block/goose) in a containerized environment, powered by the Model runner in Docker Desktop and connecting to the AI Tools Catalog by Docker. 
 
-![Screenshot](https://private-user-images.githubusercontent.com/426039/427021334-4259005e-2d83-4fc0-ba41-80dd44c327dd.png?jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NDM5NDMyNzYsIm5iZiI6MTc0Mzk0Mjk3NiwicGF0aCI6Ii80MjYwMzkvNDI3MDIxMzM0LTQyNTkwMDVlLTJkODMtNGZjMC1iYTQxLTgwZGQ0NGMzMjdkZC5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjUwNDA2JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI1MDQwNlQxMjM2MTZaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1hYTQ5ZWViOWVmMzZjZDg5OGZkYmM5MGI4NDg4YmQ1MjllOWM3ZTEzOWMwMGYwZjc4MGI4ODQzZGY1ZmYyNjZiJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCJ9.pnRW0KUG12xxgX3JCQxgVYXUMTlyEwpTiWc29vCeB2E)
-
 If you have a Docker Desktop with the Model runner installed, you can run it locally: 
 
 ```
