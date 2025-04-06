@@ -1,30 +1,16 @@
 extensions:
-  developer:
-    name: developer
-    type: builtin
-    enabled: false
-  memory:
-    name: memory
-    type: builtin
-    enabled: false
-  dockeraitoolcatalog:
-    args:
-    - run
-    - -i
-    - --rm
-    - alpine/socat
-    - STDIO
-    - TCP:host.docker.internal:8811
-    cmd: docker
-  enabled: false
+  google-maps-sse:
+    description: null
+    enabled: true
     envs: {}
-    name: DockerAIToolCatalog
-    timeout: 300
-    type: stdio
+    name: google-maps-sse
+    timeout: 15
+    type: sse
+    uri: http://localhost:8000/sse
 GOOSE_MODE: auto
 GOOSE_CLI_MIN_PRIORITY: 0.8
 keyring: false
 OPENAI_API_KEY: irrelevant
 OPENAI_BASE_PATH: /engines/llama.cpp/v1/chat/completions
 OPENAI_HOST: http://model-runner.docker.internal
-OLLAMA_HOST: http://ollama:11434
+OLLAMA_HOST: http://localhost:11434

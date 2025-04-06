@@ -1,0 +1,91 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hani-service
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/container-dependencies: '{ "hani": ["ollama", "google-maps-sse"] }'
+        run.googleapis.com/execution-environment: gen2        
+        run.googleapis.com/vpc-access-connector: projects/semibigvms/locations/europe-west1/connectors/hani-connector
+        run.googleapis.com/vpc-access-egress: private-ranges-only
+        autoscaling.knative.dev/maxScale: '1'
+        run.googleapis.com/cpu-throttling: 'false'
+        run.googleapis.com/gpu-zonal-redundancy-disabled: 'true'
+        run.googleapis.com/ingress: all
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 600
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 256Mi 
+      containers:
+      - image: docker.io/olegselajev241/hani:cloud-run
+        name: hani 
+        ports:
+        - name: http1
+          containerPort: 7681
+        env:
+        - name: OLLAMA_HOST
+          value: http://localhost:11434 
+        - name: GOOSE_PROVIDER
+          value: ollama
+        - name: GOOSE_MODEL
+          value: qwen2.5:7b
+        volumeMounts:
+        - name: dshm
+          mountPath: /mnt/dshm
+        resources:
+          limits:
+            cpu: '1'
+            memory: 512Mi
+      - image: docker.io/olegselajev241/oqwen2.5:7b
+        name: ollama 
+        env:
+          - name: OLLAMA_HOST
+            value: "0.0.0.0"
+        volumeMounts:
+        - name: dshm
+          mountPath: /mnt/dshm
+        resources:
+          limits:
+            cpu: '4' 
+            memory: 16Gi
+            nvidia.com/gpu: '1' 
+        startupProbe:
+          tcpSocket:
+            port: 11434
+          initialDelaySeconds: 10 
+          periodSeconds: 10
+          failureThreshold: 18 
+          timeoutSeconds: 1
+      - image: docker.io/olegselajev241/mcp-google-maps-sse:0.0.1
+        name: google-maps-sse
+        env:
+          - name: GOOGLE_MAPS_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: google-maps-api-key 
+                key: latest 
+    
+        volumeMounts:
+        - name: dshm
+          mountPath: /mnt/dshm
+        resources:
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        
+        startupProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3
+          timeoutSeconds: 1 

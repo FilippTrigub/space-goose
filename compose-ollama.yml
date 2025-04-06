@@ -1,0 +1,29 @@
+services:
+   hani:
+    image: olegselajev241/hani:ollama
+    ports:
+      - "7681:7681"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - GOOSE_PROVIDER=ollama
+      - GOOSE_MODEL=llama3.2:1b
+    depends_on:
+      - google-maps-sse
+      - ollama
+   ollama:
+    image: olegselajev241/ollama3.2_1b:0.0.1
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+   google-maps-sse:
+     image: olegselajev241/mcp-google-maps-sse:0.0.1
+     environment:
+       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}

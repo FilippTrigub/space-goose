@@ -32,10 +32,11 @@ RUN wget -qO- https://github.com/block/goose/releases/download/stable/download_c
 # Expose port for ttyd
 EXPOSE 7681
 
-# # Configure LLM runner as an OpenAI compatible API
+# # Configure Docker Model Runner as the default target 
 ENV OPENAI_API_KEY=irrelevant
-ENV GOOSE_PROVIDER=openai
-ENV GOOSE_MODEL=ai/qwen2.5:7B-Q4_K_M
+ENV GOOSE_PROVIDER=ollama
+ENV GOOSE_MODEL=qwen2.5:7b
+
 
 # Set entrypoint to ttyd running goose session
 ENTRYPOINT ["ttyd", "-W"]
