@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        nav { margin-bottom: 20px; }
+        nav ul { list-style: none; padding: 0; }
+        nav li { display: inline; margin-right: 10px; }
+        .login-button { padding: 10px 15px; background-color: #4285F4; color: white; text-decoration: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <% if (!user) { %>
+                <li><a href="/auth/login">Login</a></li>
+            <% } else { %>
+                <li><a href="/dashboard">Dashboard</a></li>
+                <li><a href="/auth/logout">Logout</a></li>
+            <% } %>
+        </ul>
+    </nav>
+    <header>
+        <h1>Login to Proceed</h1>
+    </header>
+    <main>
+        <p>Please log in using your Google account to access the application.</p>
+        <a href="/auth/google" class="login-button">Login with Google</a>
+    </main>
+</body>
+</html> 

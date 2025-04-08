@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard - Google Docs AI</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        nav { margin-bottom: 20px; }
+        nav ul { list-style: none; padding: 0; }
+        nav li { display: inline; margin-right: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        a { text-decoration: none; color: #007bff; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <li>Welcome, <%= user.displayName %>!</li>
+            <li><a href="/dashboard">Dashboard</a></li>
+            <li><a href="/auth/logout">Logout</a></li>
+            <!-- Add link to home or other sections if needed -->
+        </ul>
+    </nav>
+    <header>
+        <h1>Your Recent Google Docs</h1>
+    </header>
+    <main>
+        <% if (documents && documents.length > 0) { %>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Last Modified</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% documents.forEach(function(doc){ %>
+                        <tr>
+                            <td>
+                                <% if (doc.webViewLink) { %>
+                                    <a href="<%= doc.webViewLink %>" target="_blank" title="Open in Google Docs"><%= doc.name %></a>
+                                <% } else { %>
+                                    <%= doc.name %>
+                                <% } %>
+                            </td>
+                            <td><%= new Date(doc.modifiedTime).toLocaleString() %></td>
+                            <td>
+                                <a href="/docs/<%= doc.id %>">View/Comment</a>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        <% } else { %>
+            <p>No recent Google Docs found or unable to fetch documents.</p>
+        <% } %>
+    </main>
+
+</body>
+</html> 

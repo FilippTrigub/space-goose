@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Google Docs AI Commenter</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        nav { margin-bottom: 20px; }
+        nav ul { list-style: none; padding: 0; }
+        nav li { display: inline; margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <ul>
+            <% if (!user) { %>
+                <li><a href="/auth/login">Login</a></li>
+            <% } else { %>
+                <li>Welcome, <%= user.displayName %>!</li>
+                <li><a href="/dashboard">Dashboard</a></li>
+                <li><a href="/auth/logout">Logout</a></li>
+            <% } %>
+        </ul>
+    </nav>
+    <header>
+        <h1>Welcome to the Google Docs AI Commenter</h1>
+    </header>
+    <main>
+        <% if (!user) { %>
+            <p>Please <a href="/auth/login">Login</a> to view your documents.</p>
+        <% } else { %>
+            <p>Go to your <a href="/dashboard">Dashboard</a> to see your recent documents.</p>
+        <% } %>
+    </main>
+</body>
+</html> 
