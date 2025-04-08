@@ -16,6 +16,19 @@
         .comments-section { flex: 1; margin-left: 20px; padding: 15px; border: 1px solid #eee; background-color: #f9f9f9; overflow-y: auto; height: calc(100vh - 150px); /* Adjust */}
         .comment { margin-bottom: 10px; padding: 8px; background-color: #e9ecef; border-radius: 4px; font-size: 0.9em; }
         h1, h2 { margin-top: 0; }
+        /* Style paragraphs representing horizontal rules */
+        #editor p[hr="true"] {
+            height: 1px; /* Or adjust as needed */
+            border: 0;
+            border-top: 1px solid #ccc;
+            margin: 1em 0;
+            padding: 0;
+            line-height: 0; /* Prevent extra space */
+        }
+        /* Hide the default hr element if any were created by mistake */
+        #editor hr {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -68,46 +81,140 @@
             }
         });
 
-        // Get the document content passed from the server
         // WARNING: This is raw Google Docs content structure, NOT directly usable by Quill.
         // We need a conversion function.
-        const rawDocContent = <%- documentContent %>; // Use <%- %> for unescaped JSON
+        const rawDocContent = <%- documentContent %>;
+        const inlineObjects = <%- documentInlineObjects %>;
 
         console.log("Raw Google Docs Content Structure:", rawDocContent);
+        console.log("Inline Objects:", inlineObjects);
 
         // --- Placeholder for Content Conversion ---
         // This function needs to traverse the rawDocContent and build
         // Quill Delta operations (https://quilljs.com/docs/delta/)
-        function convertGoogleDocsToQuillDelta(googleBodyContent) {
+        function convertGoogleDocsToQuillDelta(googleBodyContent, inlineObjectData) {
             let deltaOps = [];
             if (googleBodyContent && Array.isArray(googleBodyContent)) {
                 googleBodyContent.forEach(element => {
                     if (element.paragraph) {
-                        let paragraphText = '';
+                        let paragraphOps = []; // Operations for this paragraph
                         element.paragraph.elements.forEach(pe => {
                             if (pe.textRun && pe.textRun.content) {
-                                paragraphText += pe.textRun.content;
+                                let text = pe.textRun.content;
+                                let attributes = {};
+                                if (pe.textRun.textStyle) {
+                                    if (pe.textRun.textStyle.bold) {
+                                        attributes.bold = true;
+                                    }
+                                    if (pe.textRun.textStyle.italic) {
+                                        attributes.italic = true;
+                                    }
+                                    if (pe.textRun.textStyle.underline) {
+                                        attributes.underline = true; // Handle underline
+                                    }
+                                    if (pe.textRun.textStyle.link && pe.textRun.textStyle.link.url) { // Safe navigation
+                                        attributes.link = pe.textRun.textStyle.link.url;
+                                    }
+                                }
+                                if (text.trim() || (text === '\n' && Object.keys(attributes).length > 0)) {
+                                   paragraphOps.push({ insert: text, attributes: attributes });
+                                }
+                            } else if (pe.horizontalRule) {
+                                console.log("Horizontal Rule detected:", pe.horizontalRule);
+                                // Insert a horizontal rule using Quill's divider blot
+                                paragraphOps.push({ insert: { divider: true } }); // Divider handles block formatting
+                            } else if (pe.inlineObjectElement) {
+                                // Handle inline images
+                                const objectId = pe.inlineObjectElement.inlineObjectId;
+                                const proxyUrl = `/image-proxy/<%= documentId %>/${objectId}`; // Use our proxy route
+
+                                console.log("Using proxy URL for image:", proxyUrl);
+
+                                // Simplified insertion for debugging
+                                paragraphOps.push({ insert: { image: proxyUrl } });
+
+                                // --- Code with attributes (can be re-enabled later) ---
+                                // const imageProps = inlineObjectData && inlineObjectData[objectId] && inlineObjectData[objectId].inlineObjectProperties && inlineObjectData[objectId].inlineObjectProperties.embeddedObject;
+                                // let imgAttributes = {};
+                                // if (imageProps && imageProps.size) {
+                                //     if (imageProps.size.width && imageProps.size.width.magnitude) {
+                                //         imgAttributes.width = imageProps.size.width.magnitude + (imageProps.size.width.unit === 'PT' ? '' : imageProps.size.width.unit.toLowerCase());
+                                //     }
+                                //     if (imageProps.size.height && imageProps.size.height.magnitude) {
+                                //         imgAttributes.height = imageProps.size.height.magnitude + (imageProps.size.height.unit === 'PT' ? '' : imageProps.size.height.unit.toLowerCase());
+                                //     }
+                                // }
+                                // paragraphOps.push({ insert: { image: proxyUrl }, attributes: imgAttributes });
+                                // -----------------------------------------------------
+
                             }
+                            // TODO: Handle other element types like equations etc.
                         });
-                        // Very basic: just insert the text with a newline.
-                        // Ignores all formatting (bold, italic, lists, etc.)
-                        if (paragraphText) {
-                           deltaOps.push({ insert: paragraphText });
-                        } else {
-                            // Handle empty paragraphs or elements without textRun (e.g., horizontal rule)
-                            deltaOps.push({ insert: '\n' }); // Insert newline for paragraph break
+
+                        // Ensure paragraph ends with a newline, applying list formatting if needed
+                        let paragraphAttributes = {};
+                        if (element.paragraph.bullet) {
+                            // Handle list type and indentation
+                            paragraphAttributes.list = 'bullet'; // Assuming bullet for now, TODO: check listId for ordered
+                            if (element.paragraph.bullet.nestingLevel) {
+                                paragraphAttributes.indent = element.paragraph.bullet.nestingLevel;
+                            }
                         }
+
+                        // >> Check for paragraph bottom border HERE <<
+                        const pStyle = element.paragraph.paragraphStyle;
+                        if (pStyle && pStyle.borderBottom && pStyle.borderBottom.width?.magnitude > 0 && pStyle.borderBottom.dashStyle === 'SOLID') {
+                            console.log("Paragraph borderBottom detected, adding HR attribute to paragraph ending at index:", element.endIndex);
+                            paragraphAttributes.hr = true; // Add hr attribute to be applied to the final newline
+                        }
+
+                        // Check if the last op in the paragraph already ends with newline
+                        const lastOp = paragraphOps[paragraphOps.length - 1];
+                        let endsWithNewline = lastOp && typeof lastOp.insert === 'string' && lastOp.insert.endsWith('\n');
+
+                        if (!endsWithNewline) {
+                            // Add the newline with paragraph attributes (list and/or hr)
+                            paragraphOps.push({ insert: '\n', attributes: paragraphAttributes });
+                        } else if (Object.keys(paragraphAttributes).length > 0) {
+                            // If it ends with newline but needs attributes, merge them (list and/or hr)
+                            lastOp.attributes = { ...(lastOp.attributes || {}), ...paragraphAttributes };
+                        }
+
+                        deltaOps.push(...paragraphOps);
+
+                        // << REMOVE separate HR push >>
+                        /*
+                        if (pStyle && pStyle.borderBottom && pStyle.borderBottom.width?.magnitude > 0 && pStyle.borderBottom.dashStyle === 'SOLID') {
+                            console.log("Paragraph borderBottom detected, adding HR attribute for paragraph ending at index:", element.endIndex);
+                            // Insert newline with HR attribute *after* the paragraph content/newline
+                            deltaOps.push({ insert: '\n', attributes: { hr: true } });
+                        }
+                        */
+
+                    } else if (element.table) {
+                         // Basic table handling - insert placeholder text
+                         deltaOps.push({ insert: '[Table detected - content not rendered]\n' });
+                         // TODO: Implement proper table conversion to Quill Delta format (more complex)
+                    } else if (element.sectionBreak) {
+                        deltaOps.push({ insert: '\n' }); // Treat section break as paragraph break
                     }
-                    // TODO: Handle other element types (tables, lists, images etc.)
+                    // TODO: Handle other top-level element types
                 });
             }
+             // Filter out empty insert operations unless they are intentional newlines
+            deltaOps = deltaOps.filter(op => op.insert !== '' || (op.insert === '\n' && Object.keys(op.attributes || {}).length > 0));
+
             console.log("Generated Quill Delta Ops:", deltaOps);
+            // Check if any HR ops were generated
+            const hasHR = deltaOps.some(op => op.attributes && op.attributes.hr === true);
+            console.log("Generated Delta contains HR attribute?", hasHR);
+
             return { ops: deltaOps };
         }
 
         // Convert and set Quill content
         try {
-            const quillContent = convertGoogleDocsToQuillDelta(rawDocContent);
+            const quillContent = convertGoogleDocsToQuillDelta(rawDocContent, inlineObjects);
             quill.setContents(quillContent);
         } catch (e) {
             console.error("Error setting Quill content:", e);

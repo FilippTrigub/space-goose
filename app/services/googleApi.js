@@ -51,7 +51,7 @@ async function getDocumentContent(authClient, documentId) {
         const res = await docs.documents.get({
             documentId: documentId,
             // Requesting the body content. Adjust fields as needed.
-            fields: 'body,documentId,title', // Added title
+            fields: 'body,documentId,title,inlineObjects', // Added title and inlineObjects
         });
         console.log(`Fetched content for doc ID: ${documentId}`);
         // console.log(JSON.stringify(res.data.body, null, 2)); // Log structure if needed
