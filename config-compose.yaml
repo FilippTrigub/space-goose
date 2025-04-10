@@ -1,12 +1,12 @@
 extensions:
-  google-maps-sse:
+  mcp-gdrive-sse:
     description: null
     enabled: true
     envs: {}
-    name: google-maps-sse
+    name: mcp-gdrive-sse
     timeout: 15
     type: sse
-    uri: http://google-maps-sse:8000/sse
+    uri: http://mcp-gdrive-sse:8000/sse
 GOOSE_MODE: auto
 GOOSE_CLI_MIN_PRIORITY: 0.8
 keyring: false

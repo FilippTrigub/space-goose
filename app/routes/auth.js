@@ -21,20 +21,40 @@ router.get('/logout', (req, res, next) => {
     });
 });
 
-// Auth with Google
+// Route to start the Google authentication flow
 router.get('/google', passport.authenticate('google', {
-    scope: [
-        'profile',
-        'email',
-        'https://www.googleapis.com/auth/documents.readonly',
-        'https://www.googleapis.com/auth/drive.metadata.readonly'
-    ]
+    scope: ['profile', 'email', 'openid'] // Request necessary scopes
 }));
 
-// Callback route for Google to redirect to
-router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/login' }), (req, res) => {
-    // Successful authentication, redirect dashboard.
-    res.redirect('/dashboard'); // We'll create this route later
+// Callback route Google redirects to after user grants permission
+router.get('/google/callback',
+    passport.authenticate('google', {
+        // failureRedirect: '/', // Redirect to home/login page on failure
+        // Handle failure explicitly to show error message
+        failureWithError: true // Pass errors to the error handler middleware
+     }),
+    (req, res) => {
+        // Successful authentication!
+        console.log('Authentication successful, user:', req.user.displayName);
+        // The ID token was already posted to the internal service in passport-setup.js
+        // Redirect the user to the terminal page.
+        res.redirect('/terminal'); // Nginx will handle proxying this path
+    }
+);
+
+// Error handler specifically for Passport authentication failures
+router.use((err, req, res, next) => {
+  if (err && err.message && err.message.includes('Failed to obtain access token')) {
+    // Handle cases where Google rejects the request (e.g., consent screen cancel)
+    console.warn('Authentication failed (likely user cancellation):', err.message);
+    res.redirect('/?error=auth_cancelled'); // Redirect with error query param
+  } else if (err) {
+    // Handle other authentication errors (e.g., internal auth service failure)
+    console.error('Authentication Error:', err);
+    res.redirect('/?error=auth_failed'); // Redirect with generic error query param
+  } else {
+    next();
+  }
 });
 
 module.exports = router; 

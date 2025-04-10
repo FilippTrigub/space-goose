@@ -4,26 +4,16 @@ services:
     ports:
       - "7681:7681"
     environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - GOOSE_PROVIDER=ollama
-      - GOOSE_MODEL=qwen2.5:7b
+      - GOOSE_PROVIDER=google
+      - GOOSE_MODEL=gemini-2.0-flash
     depends_on:
-      - google-maps-sse
-      - ollama
-   ollama:
-    image: olegselajev241/oqwen2.5:7b
-    ports:
-      - "11434:11434"
+      - mcp-gdrive-sse
+    env_file:
+      - .env
+   mcp-gdrive-sse:
+    image: olegselajev241/mcp-gdrive-sse:latest
     environment:
-      - OLLAMA_HOST=0.0.0.0
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-   google-maps-sse:
-     image: olegselajev241/mcp-google-maps-sse:0.0.1
-     environment:
-       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - GOOGLE_CLIENT_ID=54127830651-it44hsm3j97jtjcrqsilqplft725vtto.apps.googleusercontent.com
+      - GOOGLE_CLIENT_SECRET=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
+      - SESSION_SECRET=@zH6x8ThfQBtbsshMrf8pFX
+      - CALLBACK_URL=http://localhost:3000/auth/google/callback

@@ -5,19 +5,28 @@ const passport = require('passport');
 const passportSetup = require('./config/passport-setup'); // Import passport configuration
 const authRoutes = require('./routes/auth'); // Import auth routes
 const indexRoutes = require('./routes/index'); // Import index routes
+const fetch = require('node-fetch'); // Use require for CommonJS
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Session configuration
+// IMPORTANT: Use a proper session store (like connect-redis, connect-mongo) for production
+// IMPORTANT: Set a strong, secret key from environment variables
+const SESSION_SECRET = process.env.SESSION_SECRET || 'some-very-strong-secret-key'; // TODO: Replace or set env var
 app.use(session({
-    secret: process.env.SESSION_SECRET, // Required, should be in .env
+    secret: SESSION_SECRET,
     resave: false,
-    saveUninitialized: false, // Set to false for login sessions
-    // Add store configuration for production environments
+    saveUninitialized: false, // Don't create session until something stored
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (requires HTTPS)
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
 }));
 
-// Initialize Passport
+// Initialize Passport and restore authentication state, if any, from the session.
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -31,11 +40,31 @@ app.use(express.static('public'));
 app.use('/auth', authRoutes); // Mount auth routes
 app.use('/', indexRoutes); // Mount index routes (including dashboard)
 
-// Basic route (now handled by indexRoutes if at '/', but keep for fallback or remove)
+// Middleware to parse plain text body (for the Google ID token)
+app.use(express.text({ type: 'text/plain' }));
+
+// Login Page Route (Root)
 app.get('/', (req, res) => {
-    // res.send('Hello World!'); // Replace with rendering a home page later
-    res.render('home', { user: req.user }); // Render home page view
+    if (req.isAuthenticated()) {
+        // If already logged in, maybe redirect to terminal? Or show a logged-in home.
+        res.redirect('/terminal'); // Redirect to terminal if session exists
+    } else {
+        // Serve the login page (modified index.html)
+        res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    }
 });
+
+// Protected route simulation (for redirecting to ttyd)
+// Nginx handles the actual proxy to ttyd for /terminal,
+// but this route *could* exist to ensure auth before Nginx sees it,
+// though it's simpler to let Nginx proxy and have ttyd be the destination.
+// If we relied on this route, Nginx would proxy /terminal to this Node app,
+// which would then internally redirect or proxy again - less efficient.
+// Let's keep it simple: login flow ends with res.redirect('/terminal') in auth.js,
+// and Nginx proxies /terminal directly to ttyd.
+
+// --- Remove the old /auth POST endpoint --- 
+// The functionality is now handled by passport-setup.js during the callback.
 
 // Start server
 app.listen(PORT, () => {

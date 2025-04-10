@@ -6,8 +6,8 @@ ENV OLLAMA_HOST=0.0.0.0
 
 # Pull the desired model during the image build process
 # This ensures the model is included in the final image layers
-RUN ollama serve & sleep 5 && ollama pull qwen2.5:7b
+RUN ollama serve & sleep 5 && ollama pull qwen2.5-coder:14b-instruct-q6_K
 
 # The base image's default entrypoint/command is 'ollama serve'.
 # When a container starts from this image, it will automatically run 'ollama serve'
-# with the pre-pulled model available. 
+# with the pre-pulled model available. 9 08

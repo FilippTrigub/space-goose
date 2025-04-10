@@ -8,7 +8,17 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
         tar \
         libxcb \
         dbus-libs \
-        && microdnf clean all
+        nginx \
+        nodejs \
+        && microdnf clean all && \
+        # Install necessary npm packages globally if needed or handle in app directory
+        npm install -g node-process-hider && \
+        # Create default nginx directories if they don't exist
+        mkdir -p /var/log/nginx /var/cache/nginx /run/nginx && \
+        # Ensure nginx user exists and set permissions (adjust user/group as needed)
+        useradd nginx || true && \
+        chown -R nginx:nginx /var/log/nginx /var/cache/nginx /run/nginx /var/lib/nginx && \
+        chmod -R 755 /var/log/nginx /var/cache/nginx /run/nginx /var/lib/nginx
 
 ENV PATH="/root/.local/bin:${PATH}"
 # Create a directory for Goose and set PATH
@@ -28,17 +38,30 @@ COPY config-${SETUP}.yaml /root/.config/goose/config.yaml
 # Download and install Goose
 RUN wget -qO- https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash && \
     ls -la /root/.local/bin/goose && \
-    /root/.local/bin/goose --version  
-    
-# Expose port for ttyd
-EXPOSE 7681
+    /root/.local/bin/goose --version
 
-# # Configure Docker Model Runner as the default target 
+# Copy Node.js app
+COPY app/ /app/app/
+WORKDIR /app/app
+RUN npm install
+WORKDIR /app
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Expose port for nginx
+EXPOSE 8080
+
+# Configure Docker Model Runner as the default target
 ENV OPENAI_API_KEY=irrelevant
+ENV GOOGLE_API_KEY=irrelevant
 ENV GOOSE_PROVIDER=openai
 ENV GOOSE_MODEL=ai/qwen2.5:7B-Q4_K_M
 
-
-# Set entrypoint to ttyd running goose session
-ENTRYPOINT ["ttyd", "-W"]
-CMD ["goose"]
+# Run entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD []
