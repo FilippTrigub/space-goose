@@ -1,4 +1,10 @@
 extensions:
+  developer:
+    display_name: null
+    enabled: true
+    name: developer
+    timeout: null
+    type: builtin
   mcp-gdrive-sse:
     description: null
     enabled: true
@@ -10,7 +16,4 @@ extensions:
 GOOSE_MODE: auto
 GOOSE_CLI_MIN_PRIORITY: 0.8
 keyring: false
-OPENAI_API_KEY: irrelevant
-OPENAI_BASE_PATH: /engines/llama.cpp/v1/chat/completions
-OPENAI_HOST: http://model-runner.docker.internal
 OLLAMA_HOST: http://ollama:11434

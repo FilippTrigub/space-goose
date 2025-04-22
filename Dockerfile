@@ -35,6 +35,7 @@ RUN wget -O /tmp/ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/1
 ARG SETUP=local
 
 COPY config-${SETUP}.yaml /root/.config/goose/config.yaml
+COPY .goosehints /root/.config/goose/.goosehints
 # Download and install Goose
 RUN wget -qO- https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash && \
     ls -la /root/.local/bin/goose && \

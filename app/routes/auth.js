@@ -23,16 +23,15 @@ router.get('/logout', (req, res, next) => {
 
 // Route to start the Google authentication flow
 router.get('/google', passport.authenticate('google', {
-    scope: ['profile', 'email', 'openid'] // Request necessary scopes
+    scope: ['profile', 'email', 'openid', 'https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/docs']
 }));
 
 // Callback route Google redirects to after user grants permission
 router.get('/google/callback',
     passport.authenticate('google', {
-        // failureRedirect: '/', // Redirect to home/login page on failure
-        // Handle failure explicitly to show error message
-        failureWithError: true // Pass errors to the error handler middleware
-     }),
+        failureRedirect: '/login-failure', // Redirect on failure
+        // No scope needed here, this handles the response from Google
+    }),
     (req, res) => {
         // Successful authentication!
         console.log('Authentication successful, user:', req.user.displayName);

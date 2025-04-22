@@ -1,19 +1,21 @@
 services:
    hani:
-    image: olegselajev241/hani:compose
+    image: goose-ttyd-auth:latest
     ports:
-      - "7681:7681"
+      - "3000:8080"
     environment:
       - GOOSE_PROVIDER=google
-      - GOOSE_MODEL=gemini-2.0-flash
+      - GOOSE_MODEL=gemini-2.5-flash-preview-04-17
     depends_on:
       - mcp-gdrive-sse
     env_file:
       - .env
    mcp-gdrive-sse:
     image: olegselajev241/mcp-gdrive-sse:latest
+    ports:
+      - "8000:8000"
+      - "8001:8001"
     environment:
       - GOOGLE_CLIENT_ID=54127830651-it44hsm3j97jtjcrqsilqplft725vtto.apps.googleusercontent.com
       - GOOGLE_CLIENT_SECRET=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
-      - SESSION_SECRET=@zH6x8ThfQBtbsshMrf8pFX
-      - CALLBACK_URL=http://localhost:3000/auth/google/callback
+      

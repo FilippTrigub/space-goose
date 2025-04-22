@@ -30,27 +30,31 @@ passport.use(
             clientID: GOOGLE_CLIENT_ID,
             clientSecret: GOOGLE_CLIENT_SECRET,
             callbackURL: CALLBACK_URL, // The URL Google redirects to after user grants permission
-            scope: ['profile', 'email', 'openid'], // openid is needed for id_token
+            accessType: 'offline', // Request refresh token
+            prompt: 'consent' // Force consent screen for refresh token, useful for dev/scope changes
         },
         async (accessToken, refreshToken, params, profile, done) => {
             // This function is called after successful authentication with Google
-            const id_token = params.id_token; // Get the ID token
+            // We now receive accessToken and potentially refreshToken
 
             console.log('Google Profile received:', profile.displayName, profile.emails?.[0]?.value);
-            console.log('ID Token received (first 20 chars):', id_token ? id_token.substring(0, 20) + '...' : 'N/A');
+            console.log('Access Token received (first 20 chars):', accessToken ? accessToken.substring(0, 20) + '...' : 'N/A');
+            console.log('Refresh Token received:', refreshToken ? '[Exists]' : 'N/A'); // Don't log the actual refresh token
+            console.log('Granted Scopes:', params.scope); // Log the scopes granted by Google
 
-            if (!id_token) {
-                console.error('ID token not received from Google.');
-                return done(new Error('ID token missing from Google response.'), null);
-            }
+            // Construct the token payload for the internal service
+            const tokenData = {
+                access_token: accessToken,
+                refresh_token: refreshToken // Will be null if not granted/available
+            };
 
             // *** Call the internal /auth endpoint ***
             try {
-                console.log(`Posting ID token to internal service: ${INTERNAL_AUTH_URL}`);
+                console.log(`Posting tokens to internal service: ${INTERNAL_AUTH_URL}`);
                 const response = await fetch(INTERNAL_AUTH_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'text/plain' }, // Assuming target takes plain text token
-                    body: id_token,
+                    headers: { 'Content-Type': 'application/json' }, // Send as JSON
+                    body: JSON.stringify(tokenData), // Send the JSON payload
                 });
 
                 if (!response.ok) {
@@ -59,17 +63,17 @@ passport.use(
                     // Decide if this failure should prevent login
                     // For now, let's pass an error to Passport
                     return done(new Error(`Internal auth service failed: ${response.statusText}`), null);
-                }
+        }
 
-                console.log(`Successfully posted token to internal service, status: ${response.status}`);
+                console.log(`Successfully posted tokens to internal service, status: ${response.status}`);
 
                 // Authentication successful, proceed to serialize user
-                // We can pass the profile info and the id_token to serializeUser
+                // Store profile info, tokens are handled by the internal service now
                 const user = {
                     googleId: profile.id,
                     displayName: profile.displayName,
                     email: profile.emails?.[0]?.value,
-                    id_token: id_token, // Include the ID token
+                    // No longer storing id_token here, internal service manages tokens
                     // Add any other relevant info from profile
                 };
                 return done(null, user); // Pass user object to serializeUser
