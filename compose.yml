@@ -1,29 +1,31 @@
 services:
    hani:
-    image: olegselajev241/hani:compose
+    build:
+      context: .
     ports:
       - "7681:7681"
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - GOOSE_PROVIDER=ollama
-      - GOOSE_MODEL=qwen2.5:7b
     depends_on:
-      - google-maps-sse
-      - ollama
-   ollama:
-    image: olegselajev241/oqwen2.5:7b
-    ports:
-      - "11434:11434"
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-   google-maps-sse:
-     image: olegselajev241/mcp-google-maps-sse:0.0.1
-     environment:
-       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - mcp-gateway
+    env_file:
+      - .env
+    models:
+      qwen3:
+        model_var: GOOSE_MODEL
+   mcp-gateway:
+    image: docker/mcp-gateway:latest
+    use_api_socket: true
+    command:
+      - --transport=sse
+      - --servers=youtube_transcript
+   cloudflared: 
+    image: cloudflare/cloudflared    
+    command: tunnel --url hani:7681
+    depends_on:
+     - hani
+
+models:
+ qwen3:
+  # pre-pull the model when starting Docker Model Runner
+  model: hf.co/unsloth/qwen3-30b-a3b-instruct-2507-gguf:q5_k_m
+  context_size: 16355
+    
