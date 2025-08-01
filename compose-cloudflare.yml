@@ -1,0 +1,6 @@
+services:
+   cloudflared: 
+    image: cloudflare/cloudflared    
+    command: tunnel --url hani:7681
+    depends_on:
+     - hani

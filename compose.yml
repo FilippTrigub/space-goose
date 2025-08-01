@@ -1,21 +1,31 @@
 services:
    hani:
-    image: goose-ttyd-auth:latest
+    build:
+      context: .
     ports:
-      - "3000:8080"
-    environment:
-      - GOOSE_PROVIDER=google
-      - GOOSE_MODEL=gemini-2.5-flash-preview-04-17
+      - "7681:7681"
     depends_on:
-      - mcp-gdrive-sse
+      - mcp-gateway
     env_file:
       - .env
-   mcp-gdrive-sse:
-    image: olegselajev241/mcp-gdrive-sse:latest
-    ports:
-      - "8000:8000"
-      - "8001:8001"
-    environment:
-      - GOOGLE_CLIENT_ID=54127830651-it44hsm3j97jtjcrqsilqplft725vtto.apps.googleusercontent.com
-      - GOOGLE_CLIENT_SECRET=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
-      
+    models:
+      qwen3:
+        model_var: GOOSE_MODEL
+   mcp-gateway:
+    image: docker/mcp-gateway:latest
+    use_api_socket: true
+    command:
+      - --transport=sse
+      - --servers=youtube_transcript
+   cloudflared: 
+    image: cloudflare/cloudflared    
+    command: tunnel --url hani:7681
+    depends_on:
+     - hani
+
+models:
+ qwen3:
+  # pre-pull the model when starting Docker Model Runner
+  model: hf.co/unsloth/qwen3-30b-a3b-instruct-2507-gguf:q5_k_m
+  context_size: 16355
+    
