@@ -17,11 +17,6 @@ services:
     command:
       - --transport=sse
       - --servers=youtube_transcript
-   cloudflared: 
-    image: cloudflare/cloudflared    
-    command: tunnel --url hani:7681
-    depends_on:
-     - hani
 
 models:
  qwen3:
