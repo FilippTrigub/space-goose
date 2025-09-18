@@ -1,5 +1,5 @@
 services:
-   hani:
+   space-goose:
     build:
       context: .
     ports:
@@ -8,9 +8,9 @@ services:
       - mcp-gateway
     env_file:
       - .env
-    models:
-      qwen3:
-        model_var: GOOSE_MODEL
+    # models:
+    #   local_model:
+    #     model_var: GOOSE_MODEL
    mcp-gateway:
     image: docker/mcp-gateway:latest
     use_api_socket: true
@@ -18,9 +18,9 @@ services:
       - --transport=sse
       - --servers=youtube_transcript
 
-models:
- qwen3:
-  # pre-pull the model when starting Docker Model Runner
-  model: hf.co/unsloth/qwen3-30b-a3b-instruct-2507-gguf:q5_k_m
-  context_size: 16355
+# models:
+#  local_model:
+#   # pre-pull the model when starting Docker Model Runner
+#   model: hf.co/unsloth/gpt-oss-20b-GGUF:q5_k_m
+#   context_size: 16355
     

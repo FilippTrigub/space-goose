@@ -20,20 +20,27 @@ RUN wget -O /tmp/ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/1
 
 
 # Download and install Goose
-RUN wget -qO- https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash && \
-    ls -la /root/.local/bin/goose && \
+RUN wget -qO- https://github.com/FilippTrigub/goose-bbai/releases/download/stable/download_cli.sh | CONFIGURE=false bash 
+RUN ls -la /root/.local/bin/goose && \
     /root/.local/bin/goose --version  
     
 COPY config.yaml /root/.config/goose/config.yaml 
 RUN chmod u-w /root/.config/goose/config.yaml
 # copy goosehints too as business logic! 
 
+# # Configure Docker Model Runner as the default AI backend 
+ENV GOOSE_PROVIDER=openai
+ENV OPENAI_HOST=https://api.blackbox.ai
+ENV OPENAI_BASE_PATH=/v1/chat/completions
+ENV GOOSE_MODEL=blackboxai/google/gemini-2.5-pro
+ENV GOOSE_LEAD_MODEL=blackboxai/google/gemini-2.5-pro
+
+ENV BLACKBOX_API_KEY=$BLACKBOX_API_KEY
+ENV OPENAI_API_KEY=$OPENAI_API_KEY
+ENV OPENROUTER_API_KEY=$OPENROUTER_API_KEY
+
 # Expose port for ttyd
 EXPOSE 7681
-
-# # Configure Docker Model Runner as the default AI backend 
-ENV OPENAI_API_KEY=irrelevant
-ENV GOOSE_MODEL=change_me
 
 # Set entrypoint to ttyd running goose session
 ENTRYPOINT ["ttyd", "-W"]

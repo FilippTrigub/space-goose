@@ -1,6 +1,6 @@
 services:
    cloudflared: 
     image: cloudflare/cloudflared    
-    command: tunnel --url hani:7681
+    command: tunnel --url space-goose:7681 --no-autoupdate run --token $token
     depends_on:
-     - hani
+     - space-goose

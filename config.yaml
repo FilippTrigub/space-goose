@@ -20,6 +20,6 @@ GOOSE_MODE: auto
 GOOSE_PROVIDER: openai
 GOOSE_ROUTER_TOOL_SELECTION_STRATEGY: default
 
-OPENAI_BASE_PATH: engines/llama.cpp/v1/chat/completions
-OPENAI_HOST: http://model-runner.docker.internal
+OPENAI_BASE_PATH: /v1/chat/completions
+OPENAI_HOST: https://api.blackbox.ai
 
