@@ -6,8 +6,8 @@ services:
       - "7681:7681"
     depends_on:
       - mcp-gateway
-    env_file:
-      - .env
+    # env_file:
+    #   - .env
     # models:
     #   local_model:
     #     model_var: GOOSE_MODEL
