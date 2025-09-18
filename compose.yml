@@ -12,12 +12,12 @@ services:
     # models:
     #   local_model:
     #     model_var: GOOSE_MODEL
-   mcp-gateway:
-    image: docker/mcp-gateway:latest
-    use_api_socket: true
-    command:
-      - --transport=sse
-      - --servers=youtube_transcript
+  #  mcp-gateway:
+  #   image: docker/mcp-gateway:latest
+  #   use_api_socket: true
+  #   command:
+  #     - --transport=sse
+  #     - --servers=youtube_transcript
 
 # models:
 #  local_model:
