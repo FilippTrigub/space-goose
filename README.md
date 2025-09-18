@@ -1,7 +1,7 @@
-# Hani (goose in Estonian)
+# Space Goose
 
-This project sets up [Goose](https://github.com/block/goose) in a containerized environment.
-It uses `ttyd` to provide a web terminal interface to Goose.
+Forked from [Hani](https://github.com/BlockDev/hani).
+Deploys goose to the cloud.
 
 ## Usage
 
