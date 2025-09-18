@@ -13,7 +13,7 @@ services:
     #     model_var: GOOSE_MODEL
    mcp-gateway:
     image: docker/mcp-gateway:latest
-    # use_api_socket: true
+    use_api_socket: true
     command:
       - --transport=sse
       - --servers=youtube_transcript
