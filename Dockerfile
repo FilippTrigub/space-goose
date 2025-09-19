@@ -1,13 +1,23 @@
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
-    # Install dependencies
-    RUN microdnf install -y \
-        wget \
-        ca-certificates \
-        bzip2 \
-        tar \
-        libxcb \
-        dbus-libs \
-        && microdnf clean all
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
+# Install dependencies
+RUN microdnf install -y \
+    wget \
+    ca-certificates \
+    bzip2 \
+    tar \
+    libxcb \
+    dbus-libs \
+    nodejs \
+    npm \
+    && microdnf clean all
+
+
+RUN microdnf update -y --nodocs
+RUN microdnf module reset nodejs
+RUN microdnf module -y enable nodejs:22
+RUN microdnf -y install tar gzip nodejs-1:22.19.0-2.module+el9.6.0+23473+45664c2d.x86_64 npm --nodocs
+RUN microdnf clean all
+
 
 ENV PATH="/root/.local/bin:${PATH}"
 # Create a directory for Goose and set PATH
@@ -24,7 +34,11 @@ RUN wget -qO- https://github.com/FilippTrigub/goose-bbai/releases/download/stabl
 RUN ls -la /root/.local/bin/goose && \
     /root/.local/bin/goose --version  
     
-COPY config.yaml /root/.config/goose/config.yaml 
+RUN mkdir -p /root/.config/goose
+
+# Copy pre-configured config.yaml
+COPY .config/goose/config.yaml /root/.config/goose/config.yaml
+
 RUN chmod u-w /root/.config/goose/config.yaml
 # copy goosehints too as business logic! 
 
@@ -34,16 +48,6 @@ ENV OPENAI_HOST=https://api.blackbox.ai
 ENV OPENAI_BASE_PATH=/v1/chat/completions
 ENV GOOSE_MODEL=blackboxai/google/gemini-2.5-pro
 ENV GOOSE_LEAD_MODEL=blackboxai/google/gemini-2.5-pro
-
-ENV BLACKBOX_API_KEY=$BLACKBOX_API_KEY
-ENV OPENAI_API_KEY=$OPENAI_API_KEY
-ENV OPENROUTER_API_KEY=$OPENROUTER_API_KEY
-
-ENV GOOSE_GITHUB_CLIENT_SECRET=$GOOSE_GITHUB_CLIENT_SECRET
-ENV GOOSE_GITHUB_CLIENT_ID=$GOOSE_GITHUB_CLIENT_ID
-ENV GOOSE_AUTH_REDIRECT_URL=$GOOSE_AUTH_REDIRECT_URL
-ENV GOOSE_AUTH_LISTEN_ADDR=$GOOSE_AUTH_LISTEN_ADDR
-ENV GOOSE_NO_BROWSER=$GOOSE_NO_BROWSER
 
 # Expose port for ttyd
 EXPOSE 7681

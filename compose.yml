@@ -1,23 +1,29 @@
-version: '2.39'
 services:
-   space-goose:
+   space-goose-2:
     build:
       context: .
     ports:
       - "7681:7681"
-    depends_on:
-      - mcp-gateway
-    # env_file:
-    #   - .env
+    # depends_on:
+    #   - goose-gateway-2
+    env_file:
+      - .env
     # models:
     #   local_model:
     #     model_var: GOOSE_MODEL
-  #  mcp-gateway:
+  #  goose-gateway-2:
   #   image: docker/mcp-gateway:latest
   #   use_api_socket: true
   #   command:
   #     - --transport=sse
-  #     - --servers=youtube_transcript
+  #     - --servers=github-official
+#       - --secrets=/run/secrets/mcp_secret
+#     secrets:
+#       - mcp_secret
+
+# secrets:
+#   mcp_secret:
+#     file: .env.mcp_gateway
 
 # models:
 #  local_model:
