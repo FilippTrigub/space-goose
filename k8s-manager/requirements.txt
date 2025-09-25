@@ -6,3 +6,4 @@ kubernetes
 pymongo
 httpx
 pydantic
+python-dotenv
