@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K8s Environment Manager</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --secondary: #64748b;
+            --success: #059669;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-tertiary: #f1f5f9;
+            --border: #e2e8f0;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --text-muted: #94a3b8;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius: 0.5rem;
+            --radius-lg: 0.75rem;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+        
+        .app-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Navigation Header */
+        .nav-header {
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .nav-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .nav-brand h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .nav-user-select {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .user-selector {
+            position: relative;
+        }
+        
+        .user-selector label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-right: 0.75rem;
+        }
+        
+        .user-selector select {
+            appearance: none;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.5rem 2.5rem 0.5rem 0.75rem;
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 140px;
+        }
+        
+        .user-selector select:hover {
+            border-color: var(--primary);
+        }
+        
+        .user-selector select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        
+        .user-selector::after {
+            content: '';
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 4px solid var(--text-secondary);
+            pointer-events: none;
+        }
+        
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        
+        .content-header {
+            margin-bottom: 2rem;
+        }
+        
+        .content-title {
+            font-size: 1.875rem;
+            font-weight: 700;
+            color: var(--bg-primary);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .content-subtitle {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 1rem;
+        }
+        
+        /* Projects Grid */
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+        
+        /* Project Card */
+        .project-card {
+            background: var(--bg-primary);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-lg);
+            transition: all 0.3s ease;
+            border: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .project-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        
+        .project-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+        }
+        
+        .project-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        
+        .project-info h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+            line-height: 1.4;
+        }
+        
+        .project-id {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+        
+        .status-active {
+            background: rgba(5, 150, 105, 0.1);
+            color: var(--success);
+        }
+        
+        .status-inactive {
+            background: rgba(220, 38, 38, 0.1);
+            color: var(--danger);
+        }
+        
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        
+        .project-meta {
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+        
+        .project-meta div {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+        }
+        
+        .project-meta div:last-child {
+            margin-bottom: 0;
+        }
+        
+        .project-sessions {
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+        
+        .sessions-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+        
+        .sessions-header h4 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .session-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            background: var(--bg-primary);
+            border-radius: var(--radius);
+            font-size: 0.75rem;
+        }
+        
+        .session-name {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        
+        .session-actions {
+            display: flex;
+            gap: 0.25rem;
+        }
+        
+        .session-actions button {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.625rem;
+        }
+        
+        .project-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-decoration: none;
+            justify-content: center;
+            white-space: nowrap;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-xs {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-hover);
+        }
+        
+        .btn-secondary {
+            background: var(--secondary);
+            color: white;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            background: #475569;
+        }
+        
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+        
+        .btn-success:hover:not(:disabled) {
+            background: #047857;
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .btn-danger:hover:not(:disabled) {
+            background: #b91c1c;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        
+        .btn-outline:hover:not(:disabled) {
+            background: var(--bg-secondary);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        
+        /* Create Project Card */
+        .create-card {
+            background: var(--bg-primary);
+            border: 2px dashed var(--border);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-height: 200px;
+        }
+        
+        .create-card:hover {
+            border-color: var(--primary);
+            background: var(--bg-secondary);
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .create-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+            color: white;
+        }
+        
+        .create-card h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .create-card p {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        /* Messages Panel */
+        .messages-panel {
+            background: var(--bg-primary);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-lg);
+            margin-top: 2rem;
+        }
+        
+        .messages-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .messages-header h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .session-selector {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .session-selector select {
+            padding: 0.5rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+        }
+        
+        .message-form {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+        
+        .message-input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+        
+        .message-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        
+        .message-output {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1rem;
+            min-height: 300px;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+            font-size: 0.875rem;
+            line-height: 1.5;
+        }
+        
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+        
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .modal {
+            background: var(--bg-primary);
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+            transform: scale(0.9);
+            transition: all 0.3s;
+        }
+        
+        .modal-overlay.active .modal {
+            transform: scale(1);
+        }
+        
+        .modal-header {
+            margin-bottom: 1.5rem;
+        }
+        
+        .modal-header h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .modal-body {
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        
+        .modal-footer {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: flex-end;
+        }
+        
+        /* Alerts */
+        .alert {
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .alert-success {
+            background: rgba(5, 150, 105, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(5, 150, 105, 0.2);
+        }
+        
+        .alert-error {
+            background: rgba(220, 38, 38, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(220, 38, 38, 0.2);
+        }
+        
+        /* Loading States */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid currentColor;
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+        
+        .empty-state h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+        
+        .empty-state p {
+            font-size: 0.875rem;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .main-content {
+                padding: 1rem;
+            }
+            
+            .projects-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .message-form {
+                flex-direction: column;
+            }
+            
+            .project-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Navigation Header -->
+        <nav class="nav-header">
+            <div class="nav-content">
+                <div class="nav-brand">
+                    <h1>🚀 K8s Environment Manager</h1>
+                </div>
+                <div class="nav-user-select">
+                    <div class="user-selector">
+                        <label for="user-select">Select User:</label>
+                        <select id="user-select">
+                            <option value="">Loading users...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </nav>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="content-header">
+                <h2 class="content-title">
+                    <span id="current-user-name">Select a user to continue</span>
+                    📦 Projects
+                </h2>
+                <p class="content-subtitle">Manage your Kubernetes environments and chat with AI assistants</p>
+            </div>
+            
+            <!-- Projects Grid -->
+            <div class="projects-grid" id="projects-grid">
+                <!-- Projects will be loaded here -->
+            </div>
+            
+            <!-- Messages Panel -->
+            <div class="messages-panel" id="messages-panel" style="display: none;">
+                <div class="messages-header">
+                    <h3>💬 Chat Interface</h3>
+                    <div id="active-project-info"></div>
+                </div>
+                
+                <div class="session-selector">
+                    <label for="session-select">Session:</label>
+                    <select id="session-select" disabled>
+                        <option value="">Select a session...</option>
+                    </select>
+                    <button id="new-session-btn" class="btn btn-outline btn-xs" disabled>+ New Session</button>
+                </div>
+                
+                <div class="message-form">
+                    <input type="text" id="message-input" class="message-input" placeholder="Type your message..." disabled>
+                    <button id="send-message-btn" class="btn btn-primary" disabled>
+                        <span class="spinner" style="display: none;"></span>
+                        Send
+                    </button>
+                </div>
+                
+                <div id="message-output" class="message-output">Select an active project and session to start chatting...</div>
+            </div>
+        </main>
+        
+        <!-- Create Project Modal -->
+        <div class="modal-overlay" id="create-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>Create New Project</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="project-name-input">Project Name</label>
+                        <input type="text" id="project-name-input" placeholder="Enter a descriptive project name...">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" id="cancel-create-btn">Cancel</button>
+                    <button class="btn btn-primary" id="confirm-create-btn">
+                        <span class="spinner" style="display: none;"></span>
+                        Create Project
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Create Session Modal -->
+        <div class="modal-overlay" id="session-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>Create New Session</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="session-name-input">Session Name (Optional)</label>
+                        <input type="text" id="session-name-input" placeholder="Enter a session name...">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" id="cancel-session-btn">Cancel</button>
+                    <button class="btn btn-primary" id="confirm-session-btn">
+                        <span class="spinner" style="display: none;"></span>
+                        Create Session
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentUser = null;
+        let activeProject = null;
+        let currentSession = null;
+        let projects = [];
+        
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initializeApp();
+        });
+        
+        async function initializeApp() {
+            const userSelect = document.getElementById('user-select');
+            const messageInput = document.getElementById('message-input');
+            const sendMessageBtn = document.getElementById('send-message-btn');
+            const sessionSelect = document.getElementById('session-select');
+            const newSessionBtn = document.getElementById('new-session-btn');
+            
+            // Load users
+            try {
+                const response = await fetch('/users');
+                const users = await response.json();
+                
+                userSelect.innerHTML = '<option value="">Choose a user...</option>';
+                users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.name;
+                    userSelect.appendChild(option);
+                });
+                
+            } catch (error) {
+                showAlert('Failed to load users', 'error');
+            }
+            
+            // User selection change
+            userSelect.addEventListener('change', async (event) => {
+                const userId = event.target.value;
+                if (userId) {
+                    currentUser = userId;
+                    const userName = userSelect.options[userSelect.selectedIndex].text;
+                    document.getElementById('current-user-name').textContent = userName;
+                    await loadProjects(userId);
+                } else {
+                    currentUser = null;
+                    document.getElementById('current-user-name').textContent = 'Select a user to continue';
+                    renderProjects([]);
+                }
+            });
+            
+            // Session selection change
+            sessionSelect.addEventListener('change', (event) => {
+                currentSession = event.target.value;
+                updateMessageUI();
+            });
+            
+            // New session button
+            newSessionBtn.addEventListener('click', () => {
+                if (activeProject) {
+                    openSessionModal();
+                }
+            });
+            
+            // Message sending
+            sendMessageBtn.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMessage();
+            });
+            
+            // Modal handlers
+            setupModalHandlers();
+        }
+        
+        async function loadProjects(userId) {
+            try {
+                const response = await fetch(`/users/${userId}/projects`);
+                projects = await response.json();
+                renderProjects(projects);
+            } catch (error) {
+                showAlert('Failed to load projects', 'error');
+                renderProjects([]);
+            }
+        }
+        
+        function renderProjects(projectList) {
+            const grid = document.getElementById('projects-grid');
+            
+            if (!currentUser) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">👤</div>
+                        <h3>No User Selected</h3>
+                        <p>Please select a user from the navigation menu to view their projects.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Create project card (always first)
+            const createCard = `
+                <div class="create-card" onclick="openCreateModal()">
+                    <div class="create-icon">+</div>
+                    <h3>Create New Project</h3>
+                    <p>Set up a new Kubernetes environment</p>
+                </div>
+            `;
+            
+            if (projectList.length === 0) {
+                grid.innerHTML = createCard + `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📦</div>
+                        <h3>No Projects Yet</h3>
+                        <p>Create your first project to get started with Kubernetes environments.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const projectCards = projectList.map(project => {
+                const isActive = project.status === 'active';
+                const createdDate = project.created_at ? new Date(project.created_at).toLocaleDateString() : 'Unknown';
+                const sessions = project.sessions || [];
+                
+                // Determine session action button
+                let sessionButton = '';
+                if (!isActive) {
+                    // No session button for inactive projects
+                } else if (sessions.length === 0) {
+                    sessionButton = `<button class="btn btn-outline" onclick="createSessionForProject('${project.id}')">+ Session</button>`;
+                } else if (sessions.length === 1) {
+                    const session = sessions[0];
+                    sessionButton = `<button class="btn btn-primary" onclick="selectSession('${project.id}', '${session.session_id}', '${escapeHtml(session.name)}')">💬 Resume</button>`;
+                } else {
+                    // Multiple sessions - resume the last one (most recent)
+                    const lastSession = sessions[sessions.length - 1];
+                    sessionButton = `<button class="btn btn-primary" onclick="selectSession('${project.id}', '${lastSession.session_id}', '${escapeHtml(lastSession.name)}')">💬 Resume</button>`;
+                }
+                
+                const sessionsHtml = sessions.length > 0 ? `
+                    <div class="project-sessions">
+                        <div class="sessions-header">
+                            <h4>💬 Sessions (${sessions.length})</h4>
+                            ${isActive ? `<button class="btn btn-outline btn-xs" onclick="createSessionForProject('${project.id}')">+ New</button>` : ''}
+                        </div>
+                        ${sessions.map(session => `
+                            <div class="session-item">
+                                <span class="session-name">${escapeHtml(session.name || session.session_id.slice(0, 8))}</span>
+                                <div class="session-actions">
+                                    <button class="btn btn-primary btn-xs" onclick="selectSession('${project.id}', '${session.session_id}', '${escapeHtml(session.name)}')" ${!isActive ? 'disabled' : ''}>Chat</button>
+                                    <button class="btn btn-danger btn-xs" onclick="deleteSession('${project.id}', '${session.session_id}')">✗</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '';
+                
+                return `
+                    <div class="project-card">
+                        <div class="project-header">
+                            <div class="project-info">
+                                <h3>${escapeHtml(project.name)}</h3>
+                                <div class="project-id">ID: ${project.id.slice(0, 8)}...</div>
+                            </div>
+                            <div class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
+                                <div class="status-dot"></div>
+                                ${isActive ? 'Active' : 'Inactive'}
+                            </div>
+                        </div>
+                        
+                        <div class="project-meta">
+                            <div><span>Created:</span> <span>${createdDate}</span></div>
+                            <div><span>Status:</span> <span>${isActive ? '🟢 Running' : '🔴 Stopped'}</span></div>
+                            ${project.endpoint ? `<div><span>Endpoint:</span> <span>${project.endpoint}</span></div>` : ''}
+                        </div>
+                        
+                        ${sessionsHtml}
+                        
+                        <div class="project-actions">
+                            <button class="btn ${isActive ? 'btn-secondary' : 'btn-success'}" 
+                                    onclick="toggleProject('${project.id}', '${project.status}')">
+                                ${isActive ? '⏸️ Deactivate' : '▶️ Activate'}
+                            </button>
+                            ${sessionButton}
+                            <button class="btn btn-danger" onclick="deleteProject('${project.id}', '${escapeHtml(project.name)}')">
+                                🗑️ Delete
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            grid.innerHTML = createCard + projectCards;
+        }
+        
+        function setupModalHandlers() {
+            // Project creation modal
+            const modal = document.getElementById('create-modal');
+            const cancelBtn = document.getElementById('cancel-create-btn');
+            const confirmBtn = document.getElementById('confirm-create-btn');
+            const projectNameInput = document.getElementById('project-name-input');
+            
+            cancelBtn.addEventListener('click', () => {
+                closeCreateModal();
+            });
+            
+            confirmBtn.addEventListener('click', async () => {
+                const name = projectNameInput.value.trim();
+                if (!name) {
+                    showAlert('Please enter a project name', 'error');
+                    return;
+                }
+                
+                await createProject(name);
+            });
+            
+            projectNameInput.addEventListener('keypress', async (e) => {
+                if (e.key === 'Enter') {
+                    const name = projectNameInput.value.trim();
+                    if (name) await createProject(name);
+                }
+            });
+            
+            // Session creation modal
+            const sessionModal = document.getElementById('session-modal');
+            const cancelSessionBtn = document.getElementById('cancel-session-btn');
+            const confirmSessionBtn = document.getElementById('confirm-session-btn');
+            const sessionNameInput = document.getElementById('session-name-input');
+            
+            cancelSessionBtn.addEventListener('click', () => {
+                closeSessionModal();
+            });
+            
+            confirmSessionBtn.addEventListener('click', async () => {
+                const name = sessionNameInput.value.trim();
+                await createSession(name);
+            });
+            
+            sessionNameInput.addEventListener('keypress', async (e) => {
+                if (e.key === 'Enter') {
+                    const name = sessionNameInput.value.trim();
+                    await createSession(name);
+                }
+            });
+            
+            // Close modals when clicking overlay
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeCreateModal();
+            });
+            
+            sessionModal.addEventListener('click', (e) => {
+                if (e.target === sessionModal) closeSessionModal();
+            });
+        }
+        
+        function openCreateModal() {
+            if (!currentUser) {
+                showAlert('Please select a user first', 'error');
+                return;
+            }
+            
+            const modal = document.getElementById('create-modal');
+            const input = document.getElementById('project-name-input');
+            
+            input.value = '';
+            modal.classList.add('active');
+            setTimeout(() => input.focus(), 100);
+        }
+        
+        function closeCreateModal() {
+            const modal = document.getElementById('create-modal');
+            modal.classList.remove('active');
+        }
+        
+        function openSessionModal() {
+            const modal = document.getElementById('session-modal');
+            const input = document.getElementById('session-name-input');
+            
+            input.value = '';
+            modal.classList.add('active');
+            setTimeout(() => input.focus(), 100);
+        }
+        
+        function closeSessionModal() {
+            const modal = document.getElementById('session-modal');
+            modal.classList.remove('active');
+        }
+        
+        async function createProject(name) {
+            const confirmBtn = document.getElementById('confirm-create-btn');
+            const spinner = confirmBtn.querySelector('.spinner');
+            
+            try {
+                confirmBtn.disabled = true;
+                spinner.style.display = 'inline-block';
+                
+                const response = await fetch(`/users/${currentUser}/projects`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                
+                if (response.ok) {
+                    showAlert('Project created successfully!', 'success');
+                    closeCreateModal();
+                    await loadProjects(currentUser);
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to create project', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to create project', 'error');
+            } finally {
+                confirmBtn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+        
+        async function createSession(name) {
+            if (!activeProject) {
+                showAlert('No active project selected', 'error');
+                return;
+            }
+            
+            const confirmBtn = document.getElementById('confirm-session-btn');
+            const spinner = confirmBtn.querySelector('.spinner');
+            
+            try {
+                confirmBtn.disabled = true;
+                spinner.style.display = 'inline-block';
+                
+                const body = name ? { name } : {};
+                const response = await fetch(`/users/${currentUser}/projects/${activeProject}/sessions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                
+                if (response.ok) {
+                    showAlert('Session created successfully!', 'success');
+                    closeSessionModal();
+                    await loadProjects(currentUser);
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to create session', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to create session', 'error');
+            } finally {
+                confirmBtn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+        
+        async function toggleProject(projectId, currentStatus) {
+            const action = currentStatus === 'active' ? 'deactivate' : 'activate';
+            
+            try {
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}/${action}`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    showAlert(`Project ${action}d successfully!`, 'success');
+                    await loadProjects(currentUser);
+                    
+                    // Clear active project if we deactivated it
+                    if (action === 'deactivate' && activeProject === projectId) {
+                        activeProject = null;
+                        currentSession = null;
+                        updateMessageUI();
+                    }
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || `Failed to ${action} project`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Failed to ${action} project`, 'error');
+            }
+        }
+        
+        function createSessionForProject(projectId) {
+            activeProject = projectId;
+            openSessionModal();
+        }
+        
+        function selectSession(projectId, sessionId, sessionName) {
+            activeProject = projectId;
+            currentSession = sessionId;
+            
+            // Update session selector
+            const sessionSelect = document.getElementById('session-select');
+            const project = projects.find(p => p.id === projectId);
+            
+            if (project) {
+                sessionSelect.innerHTML = '<option value="">Select a session...</option>';
+                project.sessions.forEach(session => {
+                    const option = document.createElement('option');
+                    option.value = session.session_id;
+                    option.textContent = session.name || session.session_id.slice(0, 8);
+                    option.selected = session.session_id === sessionId;
+                    sessionSelect.appendChild(option);
+                });
+            }
+            
+            updateMessageUI(project ? project.name : 'Unknown Project', sessionName || sessionId.slice(0, 8));
+            
+            const messagesPanel = document.getElementById('messages-panel');
+            messagesPanel.style.display = 'block';
+            messagesPanel.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        async function deleteSession(projectId, sessionId) {
+            if (!confirm('Are you sure you want to delete this session?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}/sessions/${sessionId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showAlert('Session deleted successfully!', 'success');
+                    await loadProjects(currentUser);
+                    
+                    // Clear current session if we deleted it
+                    if (currentSession === sessionId) {
+                        currentSession = null;
+                        updateMessageUI();
+                    }
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to delete session', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to delete session', 'error');
+            }
+        }
+        
+        async function deleteProject(projectId, projectName) {
+            if (!confirm(`Are you sure you want to delete "${projectName}"?\n\nThis will permanently remove the project and all its resources.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showAlert('Project deleted successfully!', 'success');
+                    await loadProjects(currentUser);
+                    
+                    // Clear active project if we deleted it
+                    if (activeProject === projectId) {
+                        activeProject = null;
+                        currentSession = null;
+                        updateMessageUI();
+                    }
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to delete project', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to delete project', 'error');
+            }
+        }
+        
+        function updateMessageUI(projectName = null, sessionName = null) {
+            const messageInput = document.getElementById('message-input');
+            const sendMessageBtn = document.getElementById('send-message-btn');
+            const messageOutput = document.getElementById('message-output');
+            const projectInfo = document.getElementById('active-project-info');
+            const sessionSelect = document.getElementById('session-select');
+            const newSessionBtn = document.getElementById('new-session-btn');
+            
+            const hasActiveProject = activeProject && projectName;
+            const hasActiveSession = hasActiveProject && currentSession && sessionName;
+            
+            messageInput.disabled = !hasActiveSession;
+            sendMessageBtn.disabled = !hasActiveSession;
+            sessionSelect.disabled = !hasActiveProject;
+            newSessionBtn.disabled = !hasActiveProject;
+            
+            if (hasActiveProject) {
+                projectInfo.innerHTML = `<span class="status-badge status-active"><div class="status-dot"></div> ${escapeHtml(projectName)}</span>`;
+                
+                if (hasActiveSession) {
+                    messageOutput.textContent = `Connected to project: ${projectName}\nSession: ${sessionName}\nReady to send messages...`;
+                } else {
+                    messageOutput.textContent = `Project: ${projectName}\nPlease select or create a session to start chatting...`;
+                }
+            } else {
+                projectInfo.innerHTML = '';
+                messageOutput.textContent = 'Select an active project and session to start chatting...';
+                document.getElementById('messages-panel').style.display = 'none';
+            }
+        }
+        
+        async function sendMessage() {
+            if (!activeProject || !currentSession) return;
+            
+            const messageInput = document.getElementById('message-input');
+            const sendMessageBtn = document.getElementById('send-message-btn');
+            const messageOutput = document.getElementById('message-output');
+            const spinner = sendMessageBtn.querySelector('.spinner');
+            
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            try {
+                sendMessageBtn.disabled = true;
+                messageInput.disabled = true;
+                spinner.style.display = 'inline-block';
+                
+                messageOutput.textContent += `\n\n> ${message}\n`;
+                messageOutput.scrollTop = messageOutput.scrollHeight;
+                
+                const response = await fetch(`/users/${currentUser}/projects/${activeProject}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: message, session_id: currentSession })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    messageOutput.textContent += `\nError: ${error.detail || 'Failed to send message'}\n`;
+                    return;
+                }
+                
+                // Read the streaming response
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    
+                    // Parse SSE data lines
+                    const lines = chunk.split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const jsonStr = line.substring(6).trim();
+                                if (jsonStr) {
+                                    const data = JSON.parse(jsonStr);
+                                    
+                                    // Handle different message types from Goose API
+                                    if (data.type === 'message' && data.content) {
+                                        messageOutput.textContent += data.content.content || '';
+                                    } else if (data.content && typeof data.content === 'string') {
+                                        messageOutput.textContent += data.content;
+                                    } else if (data.error) {
+                                        messageOutput.textContent += `\nError: ${data.error}\n`;
+                                    }
+                                }
+                            } catch (e) {
+                                // If not JSON, treat as raw text
+                                const text = line.substring(6).trim();
+                                if (text) {
+                                    messageOutput.textContent += text;
+                                }
+                            }
+                        }
+                    }
+                    
+                    messageOutput.scrollTop = messageOutput.scrollHeight;
+                }
+                
+                messageInput.value = '';
+            } catch (error) {
+                messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
+            } finally {
+                sendMessageBtn.disabled = false;
+                messageInput.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+        
+        function showAlert(message, type = 'success') {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = `
+                ${type === 'success' ? '✅' : '❌'} ${escapeHtml(message)}
+            `;
+            
+            const mainContent = document.querySelector('.main-content');
+            mainContent.insertBefore(alertDiv, mainContent.firstChild);
+            
+            setTimeout(() => alertDiv.remove(), type === 'success' ? 3000 : 5000);
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Global functions for onclick handlers
+        window.openCreateModal = openCreateModal;
+        window.toggleProject = toggleProject;
+        window.deleteProject = deleteProject;
+        window.createSessionForProject = createSessionForProject;
+        window.selectSession = selectSession;
+        window.deleteSession = deleteSession;
+    </script>
+</body>
+</html>
