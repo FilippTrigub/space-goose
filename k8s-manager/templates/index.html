@@ -646,6 +646,13 @@
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
 
+        .form-help {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+            display: block;
+        }
+
         .modal-footer {
             display: flex;
             gap: 0.75rem;
@@ -882,6 +889,11 @@
                         <label for="project-name-input">Project Name</label>
                         <input type="text" id="project-name-input" placeholder="Enter a descriptive project name...">
                     </div>
+                    <div class="form-group">
+                        <label for="github-key-input">GitHub Token (Optional)</label>
+                        <input type="password" id="github-key-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                        <small class="form-help">GitHub personal access token for private repositories</small>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline" id="cancel-create-btn">Cancel</button>
@@ -914,6 +926,33 @@
                 </div>
             </div>
         </div>
+
+        <!-- Update GitHub Key Modal -->
+        <div class="modal-overlay" id="github-key-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 id="github-key-modal-title">Update GitHub Key</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="github-key-update-input">GitHub Token</label>
+                        <input type="password" id="github-key-update-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                        <small class="form-help">GitHub personal access token for private repositories. Leave empty to remove.</small>
+                    </div>
+                    <div class="github-key-current" id="github-key-current-status" style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: var(--radius); font-size: 0.875rem;">
+                        <!-- Current key status will be shown here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" id="remove-github-key-btn">Remove Key</button>
+                    <button class="btn btn-outline" id="cancel-github-key-btn">Cancel</button>
+                    <button class="btn btn-primary" id="confirm-github-key-btn">
+                        <span class="spinner" style="display: none;"></span>
+                        Update Key
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -921,6 +960,7 @@
         let activeProject = null;
         let currentSession = null;
         let projects = [];
+        let currentGitHubKeyProjectId = null;
 
         document.addEventListener('DOMContentLoaded', async () => {
             await initializeApp();
@@ -994,6 +1034,42 @@
 
             // Modal handlers
             setupModalHandlers();
+            setupGitHubKeyModalHandlers();
+        }
+
+        function setupGitHubKeyModalHandlers() {
+            const modal = document.getElementById('github-key-modal');
+            const cancelBtn = document.getElementById('cancel-github-key-btn');
+            const confirmBtn = document.getElementById('confirm-github-key-btn');
+            const removeBtn = document.getElementById('remove-github-key-btn');
+            const githubKeyInput = document.getElementById('github-key-update-input');
+
+            cancelBtn.addEventListener('click', () => {
+                closeGitHubKeyModal();
+            });
+
+            confirmBtn.addEventListener('click', async () => {
+                const githubKey = githubKeyInput.value.trim();
+                await updateGitHubKey(currentGitHubKeyProjectId, githubKey);
+            });
+
+            removeBtn.addEventListener('click', async () => {
+                if (confirm('Are you sure you want to remove the GitHub key from this project?')) {
+                    await updateGitHubKey(currentGitHubKeyProjectId, null);
+                }
+            });
+
+            githubKeyInput.addEventListener('keypress', async (e) => {
+                if (e.key === 'Enter') {
+                    const githubKey = githubKeyInput.value.trim();
+                    await updateGitHubKey(currentGitHubKeyProjectId, githubKey);
+                }
+            });
+
+            // Close modal when clicking overlay
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeGitHubKeyModal();
+            });
         }
 
         async function loadProjects(userId) {
@@ -1045,6 +1121,7 @@
                 const isActive = project.status === 'active';
                 const createdDate = project.created_at ? new Date(project.created_at).toLocaleDateString() : 'Unknown';
                 const sessions = project.sessions || [];
+                const githubKeyStatus = project.github_key_set ? '🔑 GitHub Token Set' : '🚫 No GitHub Token';
 
                 // Determine session action button
                 let sessionButton = '';
@@ -1095,6 +1172,7 @@
                         <div class="project-meta">
                             <div><span>Created:</span> <span>${createdDate}</span></div>
                             <div><span>Status:</span> <span>${isActive ? '🟢 Running' : '🔴 Stopped'}</span></div>
+                            <div><span>GitHub:</span> <span>${githubKeyStatus}</span></div>
                             ${project.endpoint ? `<div><span>Endpoint:</span> <span>${project.endpoint}</span></div>` : ''}
                         </div>
                         
@@ -1106,6 +1184,9 @@
                                 ${isActive ? '⏸️ Deactivate' : '▶️ Activate'}
                             </button>
                             ${sessionButton}
+                            <button class="btn btn-outline" onclick="openGitHubKeyModal('${project.id}', ${project.github_key_set ? 'true' : 'false'})">
+                                🔑 ${project.github_key_set ? 'Update' : 'Add'} GitHub Key
+                            </button>
                             <button class="btn btn-danger" onclick="deleteProject('${project.id}', '${escapeHtml(project.name)}')">
                                 🗑️ Delete
                             </button>
@@ -1130,6 +1211,7 @@
 
             confirmBtn.addEventListener('click', async () => {
                 const name = projectNameInput.value.trim();
+                const githubKey = document.getElementById('github-key-input').value.trim();
                 if (!name) {
                     showAlert('Please enter a project name', 'error');
                     return;
@@ -1138,7 +1220,15 @@
                 await createProject(name);
             });
 
+            // Handle Enter key in both inputs
             projectNameInput.addEventListener('keypress', async (e) => {
+                if (e.key === 'Enter') {
+                    const name = projectNameInput.value.trim();
+                    if (name) await createProject(name);
+                }
+            });
+
+            document.getElementById('github-key-input').addEventListener('keypress', async (e) => {
                 if (e.key === 'Enter') {
                     const name = projectNameInput.value.trim();
                     if (name) await createProject(name);
@@ -1185,8 +1275,10 @@
 
             const modal = document.getElementById('create-modal');
             const input = document.getElementById('project-name-input');
+            const githubInput = document.getElementById('github-key-input');
 
             input.value = '';
+            githubInput.value = '';
             modal.classList.add('active');
             setTimeout(() => input.focus(), 100);
         }
@@ -1210,18 +1302,91 @@
             modal.classList.remove('active');
         }
 
-        async function createProject(name) {
-            const confirmBtn = document.getElementById('confirm-create-btn');
+        function openGitHubKeyModal(projectId, hasKey) {
+            if (!currentUser) {
+                showAlert('Please select a user first', 'error');
+                return;
+            }
+
+            currentGitHubKeyProjectId = projectId;
+            const modal = document.getElementById('github-key-modal');
+            const input = document.getElementById('github-key-update-input');
+            const title = document.getElementById('github-key-modal-title');
+            const status = document.getElementById('github-key-current-status');
+            const removeBtn = document.getElementById('remove-github-key-btn');
+
+            // Set modal title and status
+            title.textContent = hasKey ? 'Update GitHub Key' : 'Add GitHub Key';
+            if (hasKey) {
+                status.innerHTML = '\uD83D\uDD11 <strong>Current Status:</strong> GitHub token is set for this project';
+                removeBtn.style.display = 'inline-flex';
+            } else {
+                status.innerHTML = '\uD83D\uDEAB <strong>Current Status:</strong> No GitHub token set for this project';
+                removeBtn.style.display = 'none';
+            }
+
+            input.value = '';
+            modal.classList.add('active');
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeGitHubKeyModal() {
+            const modal = document.getElementById('github-key-modal');
+            modal.classList.remove('active');
+            currentGitHubKeyProjectId = null;
+        }
+
+        async function updateGitHubKey(projectId, githubKey) {
+            const confirmBtn = document.getElementById('confirm-github-key-btn');
             const spinner = confirmBtn.querySelector('.spinner');
 
             try {
                 confirmBtn.disabled = true;
                 spinner.style.display = 'inline-block';
 
+                const requestBody = { github_key: githubKey };
+
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}/github-key`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                    closeGitHubKeyModal();
+                    await loadProjects(currentUser);
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to update GitHub key', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to update GitHub key', 'error');
+            } finally {
+                confirmBtn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+
+        async function createProject(name) {
+            const confirmBtn = document.getElementById('confirm-create-btn');
+            const spinner = confirmBtn.querySelector('.spinner');
+            const githubKey = document.getElementById('github-key-input').value.trim();
+
+            try {
+                confirmBtn.disabled = true;
+                spinner.style.display = 'inline-block';
+
+                const requestBody = { name };
+                if (githubKey) {
+                    requestBody.github_key = githubKey;
+                }
+
                 const response = await fetch(`/users/${currentUser}/projects`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (response.ok) {

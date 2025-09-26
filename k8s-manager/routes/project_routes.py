@@ -6,7 +6,7 @@ import httpx
 import asyncio
 from datetime import datetime
 
-from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session
+from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey
 from services import mongodb_service, k8s_service
 
 router = APIRouter()
@@ -27,6 +27,7 @@ async def get_projects(user_id: str):
         "name": project["name"],
         "status": project["status"],
         "endpoint": project.get("endpoint"),
+        "github_key_set": project.get("github_key_set", False),
         "sessions": project.get("sessions", []),
         "created_at": project.get("created_at"),
         "updated_at": project.get("updated_at")
@@ -39,6 +40,7 @@ async def create_project(user_id: str, project: ProjectCreate):
         "name": project.name,
         "status": "inactive",
         "sessions": [],
+        "github_key_set": bool(project.github_key),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -47,7 +49,12 @@ async def create_project(user_id: str, project: ProjectCreate):
     
     # Create K8s resources but don't activate yet
     try:
-        k8s_service.apply_project_resources(user_id, project_id)
+        k8s_service.apply_project_resources(user_id, project_id, project.github_key)
+        
+        # Store GitHub key in MongoDB if provided (masked)
+        if project.github_key:
+            mongodb_service.store_github_key(project_id, project.github_key)
+            
     except Exception as e:
         # Rollback MongoDB record if K8s fails
         mongodb_service.delete_project(project_id)
@@ -109,6 +116,30 @@ async def activate_project(user_id: str, project_id: str):
         return {"message": "Project activated successfully", "endpoint": endpoint}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to activate project: {str(e)}")
+
+@router.put("/users/{user_id}/projects/{project_id}/github-key")
+async def update_project_github_key(user_id: str, project_id: str, github_key_data: ProjectUpdateGitHubKey):
+    """Update GitHub key for an existing project"""
+    # Check if project exists
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    try:
+        # Update Kubernetes secret
+        k8s_service.update_github_secret(user_id, project_id, github_key_data.github_key)
+        
+        # Update MongoDB record
+        mongodb_service.update_github_key(project_id, github_key_data.github_key)
+        
+        action = "updated" if github_key_data.github_key else "removed"
+        return {"message": f"GitHub key {action} successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update GitHub key: {str(e)}")
 
 @router.post("/users/{user_id}/projects/{project_id}/deactivate")
 async def deactivate_project(user_id: str, project_id: str):
