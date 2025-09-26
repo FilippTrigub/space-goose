@@ -1484,7 +1484,7 @@
                 if (error.name === 'AbortError') {
                     messageOutput.textContent += `\nError: Request timed out\n`;
                 } else if (error.message === 'Stream read timeout') {
-                    messageOutput.textContent += `\nError: Stream reading timed out\n`;
+                    messageOutput.textContent += `\INFO: Stream terminated\n`;
                 } else {
                     messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
                 }
