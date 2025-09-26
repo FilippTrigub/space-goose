@@ -1,7 +1,3 @@
-# Original main.py file - kept for local development
-# For Vercel deployment, see api/index.py
-
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -36,10 +32,5 @@ async def read_root(request: Request):
 async def health_check():
     return {"status": "healthy"}
 
-if __name__ == "__main__":
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        log_level="info"
-    )
+# Export the app for Vercel serverless function
+handler = app
