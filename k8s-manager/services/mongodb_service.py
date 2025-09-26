@@ -84,5 +84,43 @@ def update_session_in_project(project_id: str, session_id: str, session_data: di
         }
     )
 
+def store_github_key(project_id: str, github_key: str):
+    """Store GitHub key for a project (masked for security)"""
+    # Store only a masked version for reference
+    masked_key = f"{github_key[:8]}{'*' * (len(github_key) - 12)}{github_key[-4:]}" if len(github_key) > 12 else "*" * len(github_key)
+    return get_projects_collection().update_one(
+        {"_id": ObjectId(project_id)},
+        {
+            "$set": {
+                "github_key_masked": masked_key,
+                "github_key_set": True,
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+
+def update_github_key(project_id: str, github_key: str = None):
+    """Update GitHub key for a project"""
+    if github_key:
+        # Store masked version for reference
+        masked_key = f"{github_key[:8]}{'*' * (len(github_key) - 12)}{github_key[-4:]}" if len(github_key) > 12 else "*" * len(github_key)
+        update_data = {
+            "github_key_masked": masked_key,
+            "github_key_set": True,
+            "updated_at": datetime.utcnow()
+        }
+    else:
+        # Remove GitHub key
+        update_data = {
+            "$unset": {"github_key_masked": ""},
+            "github_key_set": False,
+            "updated_at": datetime.utcnow()
+        }
+    
+    return get_projects_collection().update_one(
+        {"_id": ObjectId(project_id)},
+        {"$set": update_data} if github_key else update_data
+    )
+
 def delete_project(project_id: str):
     return get_projects_collection().delete_one({"_id": ObjectId(project_id)})

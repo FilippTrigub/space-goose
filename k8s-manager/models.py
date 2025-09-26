@@ -4,6 +4,7 @@ from datetime import datetime
 
 class ProjectCreate(BaseModel):
     name: str
+    github_key: Optional[str] = None
 
 class ProjectUpdate(BaseModel):
     name: str
@@ -23,6 +24,7 @@ class Project(BaseModel):
     name: str
     status: str  # active, inactive
     endpoint: Optional[str] = None
+    github_key_set: Optional[bool] = False
     sessions: Optional[List[Session]] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -30,6 +32,9 @@ class Project(BaseModel):
 class User(BaseModel):
     id: str
     name: str
+
+class ProjectUpdateGitHubKey(BaseModel):
+    github_key: Optional[str] = None
 
 class MessageRequest(BaseModel):
     content: str

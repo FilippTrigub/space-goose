@@ -135,7 +135,7 @@ def ensure_namespace(user_id: str):
     
     return namespace
 
-def apply_project_resources(user_id: str, project_id: str):
+def apply_project_resources(user_id: str, project_id: str, github_key: str = None):
     """
     Create Kubernetes resources for a project.
     """
@@ -185,6 +185,44 @@ def apply_project_resources(user_id: str, project_id: str):
         print(f"✗ Unexpected error retrieving ConfigMap: {e}")
         raise e
 
+    # Create GitHub Key Secret if provided
+    github_secret_created = False
+    github_secret_name = None
+    if github_key:
+        github_secret_name = f"proj-{project_id}-github-key"
+        try:
+            # Check if secret already exists
+            core_v1.read_namespaced_secret(name=github_secret_name, namespace=namespace)
+            print(f"ℹ GitHub Secret {github_secret_name} already exists in namespace {namespace}")
+            github_secret_created = True
+        except ApiException as e:
+            if e.status == 404:
+                # Secret doesn't exist, create it
+                secret_data = {
+                    "GITHUB_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
+                }
+                secret_body = client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=github_secret_name,
+                        labels={
+                            "managed-by": "k8s-manager",
+                            "user-id": user_id,
+                            "project-id": project_id
+                        }
+                    ),
+                    type="Opaque",
+                    data=secret_data
+                )
+                core_v1.create_namespaced_secret(namespace=namespace, body=secret_body)
+                print(f"✓ Created GitHub Secret {github_secret_name} in namespace {namespace}")
+                github_secret_created = True
+            else:
+                print(f"✗ Failed to check GitHub Secret: {e}")
+                raise e
+        except Exception as e:
+            print(f"✗ Unexpected error with GitHub Secret: {e}")
+            raise e
+
     try:
         # Create Deployment
         container_spec = client.V1Container(
@@ -198,12 +236,24 @@ def apply_project_resources(user_id: str, project_id: str):
         )
         
         # Add ConfigMap environment variables if available
+        env_from_sources = []
         if config_map_exists:
-            container_spec.env_from = [
+            env_from_sources.append(
                 client.V1EnvFromSource(
                     config_map_ref=client.V1ConfigMapEnvSource(name=config_map_name)
                 )
-            ]
+            )
+        
+        # Add GitHub Secret environment variables if available
+        if github_secret_created and github_secret_name:
+            env_from_sources.append(
+                client.V1EnvFromSource(
+                    secret_ref=client.V1SecretEnvSource(name=github_secret_name)
+                )
+            )
+        
+        if env_from_sources:
+            container_spec.env_from = env_from_sources
         
         deployment = client.V1Deployment(
             metadata=client.V1ObjectMeta(
@@ -356,6 +406,7 @@ def delete_project_resources(user_id: str, project_id: str):
     namespace = f"user-{user_id}"
     deployment_name = f"proj-{project_id}-api"
     service_name = f"proj-{project_id}-api"
+    github_secret_name = f"proj-{project_id}-github-key"
     
     errors = []
     
@@ -402,8 +453,122 @@ def delete_project_resources(user_id: str, project_id: str):
         print(f"✗ {error_msg}")
         errors.append(error_msg)
     
+    # Delete GitHub secret if it exists
+    try:
+        core_v1.delete_namespaced_secret(
+            name=github_secret_name, 
+            namespace=namespace,
+            body=client.V1DeleteOptions(grace_period_seconds=10)
+        )
+        print(f"✓ Deleted GitHub Secret: {github_secret_name}")
+    except ApiException as e:
+        if e.status == 404:
+            print(f"ℹ GitHub Secret {github_secret_name} was already deleted")
+        else:
+            # Don't add to errors - secret might not exist
+            print(f"⚠ Could not delete GitHub Secret {github_secret_name}: {e}")
+    except Exception as e:
+        print(f"⚠ Unexpected error deleting GitHub Secret {github_secret_name}: {e}")
+    
     if errors:
         raise Exception(f"Some resources could not be deleted: {'; '.join(errors)}")
+
+def update_github_secret(user_id: str, project_id: str, github_key: str = None):
+    """
+    Update or remove GitHub key secret for a project.
+    """
+    namespace = f"user-{user_id}"
+    github_secret_name = f"proj-{project_id}-github-key"
+    
+    if github_key:
+        # Create or update the secret
+        try:
+            # Check if secret already exists
+            existing_secret = core_v1.read_namespaced_secret(name=github_secret_name, namespace=namespace)
+            print(f"ℹ Updating existing GitHub Secret {github_secret_name}")
+            
+            # Update secret data
+            secret_data = {
+                "GITHUB_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
+            }
+            existing_secret.data = secret_data
+            
+            core_v1.replace_namespaced_secret(
+                name=github_secret_name,
+                namespace=namespace,
+                body=existing_secret
+            )
+            print(f"✓ Updated GitHub Secret {github_secret_name} in namespace {namespace}")
+            
+        except ApiException as e:
+            if e.status == 404:
+                # Secret doesn't exist, create it
+                secret_data = {
+                    "GITHUB_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
+                }
+                secret_body = client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=github_secret_name,
+                        labels={
+                            "managed-by": "k8s-manager",
+                            "user-id": user_id,
+                            "project-id": project_id
+                        }
+                    ),
+                    type="Opaque",
+                    data=secret_data
+                )
+                core_v1.create_namespaced_secret(namespace=namespace, body=secret_body)
+                print(f"✓ Created GitHub Secret {github_secret_name} in namespace {namespace}")
+            else:
+                print(f"✗ Failed to update GitHub Secret: {e}")
+                raise e
+        except Exception as e:
+            print(f"✗ Unexpected error updating GitHub Secret: {e}")
+            raise e
+    else:
+        # Remove the secret
+        try:
+            core_v1.delete_namespaced_secret(
+                name=github_secret_name,
+                namespace=namespace,
+                body=client.V1DeleteOptions(grace_period_seconds=10)
+            )
+            print(f"✓ Deleted GitHub Secret {github_secret_name} from namespace {namespace}")
+        except ApiException as e:
+            if e.status == 404:
+                print(f"ℹ GitHub Secret {github_secret_name} was already deleted")
+            else:
+                print(f"✗ Failed to delete GitHub Secret: {e}")
+                raise e
+        except Exception as e:
+            print(f"✗ Unexpected error deleting GitHub Secret: {e}")
+            raise e
+    
+    # If project is active, we need to restart the deployment to pick up new env vars
+    deployment_name = f"proj-{project_id}-api"
+    try:
+        deployment = apps_v1.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        if deployment.spec.replicas and deployment.spec.replicas > 0:
+            # Restart deployment by updating annotation
+            import time
+            if not deployment.spec.template.metadata.annotations:
+                deployment.spec.template.metadata.annotations = {}
+            deployment.spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"] = str(int(time.time()))
+            
+            apps_v1.patch_namespaced_deployment(
+                name=deployment_name,
+                namespace=namespace,
+                body=deployment
+            )
+            print(f"✓ Restarted deployment {deployment_name} to pick up new GitHub token")
+    except ApiException as e:
+        if e.status == 404:
+            print(f"ℹ Deployment {deployment_name} not found, skipping restart")
+        else:
+            print(f"⚠ Warning: Could not restart deployment {deployment_name}: {e}")
+    except Exception as e:
+        print(f"⚠ Warning: Unexpected error restarting deployment: {e}")
 
 def get_k8s_status():
     """
