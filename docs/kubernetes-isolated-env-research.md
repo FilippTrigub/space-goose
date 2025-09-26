@@ -128,7 +128,7 @@ echo ^          type: RuntimeDefault
 echo ^        fsGroup: 1000
 echo ^      containers:
 echo ^      - name: api
-echo ^        image: caf0957b5c26acr.azurecr.io/goose-api-server:2409251544
+echo ^        image: caf0957b5c26acr.azurecr.io/goose-api-server:2609251236
 echo ^        envFrom:
 echo ^        - configMapRef:
 echo ^            name: testuser-env

@@ -1080,7 +1080,7 @@
                 ` : '';
 
                 return `
-                    <div class="project-card">
+                    <div class="project-card" data-project-id="${project.id}">
                         <div class="project-header">
                             <div class="project-info">
                                 <h3>${escapeHtml(project.name)}</h3>
@@ -1101,7 +1101,7 @@
                         ${sessionsHtml}
                         
                         <div class="project-actions">
-                            <button class="btn ${isActive ? 'btn-secondary' : 'btn-success'}" 
+                            <button class="btn ${isActive ? 'btn-secondary' : 'btn-success'} toggle-project-btn" 
                                     onclick="toggleProject('${project.id}', '${project.status}')">
                                 ${isActive ? '⏸️ Deactivate' : '▶️ Activate'}
                             </button>
@@ -1278,8 +1278,31 @@
 
         async function toggleProject(projectId, currentStatus) {
             const action = currentStatus === 'active' ? 'deactivate' : 'activate';
+            const projectCard = document.querySelector(`[data-project-id="${projectId}"]`);
+            const toggleBtn = projectCard?.querySelector('.toggle-project-btn');
+            
+            if (!toggleBtn) return;
+
+            // Store original button content
+            const originalContent = toggleBtn.innerHTML;
+            const isActivating = action === 'activate';
 
             try {
+                // Disable button and show spinner
+                toggleBtn.disabled = true;
+                
+                if (isActivating) {
+                    toggleBtn.innerHTML = `
+                        <span class="spinner"></span>
+                        Activating...
+                    `;
+                } else {
+                    toggleBtn.innerHTML = `
+                        <span class="spinner"></span>
+                        Deactivating...
+                    `;
+                }
+
                 const response = await fetch(`/users/${currentUser}/projects/${projectId}/${action}`, {
                     method: 'POST'
                 });
@@ -1297,9 +1320,17 @@
                 } else {
                     const error = await response.json();
                     showAlert(error.detail || `Failed to ${action} project`, 'error');
+                    
+                    // Restore original button content on error
+                    toggleBtn.innerHTML = originalContent;
+                    toggleBtn.disabled = false;
                 }
             } catch (error) {
                 showAlert(`Failed to ${action} project`, 'error');
+                
+                // Restore original button content on error
+                toggleBtn.innerHTML = originalContent;
+                toggleBtn.disabled = false;
             }
         }
 
