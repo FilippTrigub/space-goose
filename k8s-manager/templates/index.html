@@ -1464,11 +1464,6 @@
             const message = messageInput.value.trim();
             if (!message) return;
 
-            // Setup timeout and abort controller
-            const controller = new AbortController();
-            const TIMEOUT_MS = 25000; // 25 seconds
-            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
             try {
                 sendMessageBtn.disabled = true;
                 messageInput.disabled = true;
@@ -1480,11 +1475,8 @@
                 const response = await fetch(`/users/${currentUser}/projects/${activeProject}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: message, session_id: currentSession }),
-                    signal: controller.signal
+                    body: JSON.stringify({ content: message, session_id: currentSession })
                 });
-
-                clearTimeout(timeoutId);
 
                 if (!response.ok) {
                     const error = await response.json();
@@ -1492,22 +1484,15 @@
                     return;
                 }
 
-                // Read the streaming response with timeout protection
+                // Read the streaming response
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let streamTimeout;
 
                 while (true) {
-                    // Clear previous stream timeout
-                    if (streamTimeout) clearTimeout(streamTimeout);
-                    
-                    // Set timeout for this read operation
                     const readPromise = reader.read();
-                    const timeoutPromise = new Promise((_, reject) => {
-                        streamTimeout = setTimeout(() => reject(new Error('Stream read timeout')), 10000);
-                    });
 
-                    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+                    const { done, value } = await reader.read();
                     
                     if (done) break;
 
@@ -1548,15 +1533,7 @@
                 messageInput.value = '';
                 
             } catch (error) {
-                clearTimeout(timeoutId);
-                
-                if (error.name === 'AbortError') {
-                    messageOutput.textContent += `\nError: Request timed out\n`;
-                } else if (error.message === 'Stream read timeout') {
-                    messageOutput.textContent += `\INFO: Stream terminated\n`;
-                } else {
-                    messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
-                }
+                messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
             } finally {
                 // This ALWAYS runs - critical for spinner cleanup
                 sendMessageBtn.disabled = false;
