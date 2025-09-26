@@ -328,10 +328,18 @@
         }
 
         .project-actions {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 0.5rem;
             margin-top: 1.5rem;
-            flex-wrap: wrap;
+        }
+
+        .project-actions .btn {
+            width: 100%;
+            justify-content: center;
+            min-height: 2.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
         }
 
         .btn {
@@ -801,7 +809,7 @@
             }
 
             .project-actions {
-                flex-direction: column;
+                grid-template-columns: 1fr;
             }
         }
     </style>
