@@ -1533,6 +1533,9 @@
 
             updateMessageUI(project ? project.name : 'Unknown Project', sessionName || sessionId.slice(0, 8));
 
+            // Load message history for the session
+            loadSessionHistory(projectId, sessionId);
+
             const messagesPanel = document.getElementById('messages-panel');
             messagesPanel.style.display = 'block';
             messagesPanel.scrollIntoView({ behavior: 'smooth' });
@@ -1642,7 +1645,8 @@
                 messageInput.disabled = true;
                 spinner.style.display = 'inline-block';
 
-                messageOutput.textContent += `\n\n> ${message}\n`;
+                // Add user message to output
+                messageOutput.textContent += `\n\n🧑 User: ${message}\n`;
                 messageOutput.scrollTop = messageOutput.scrollHeight;
 
                 const response = await fetch(`/users/${currentUser}/projects/${activeProject}/messages`, {
@@ -1653,18 +1657,20 @@
 
                 if (!response.ok) {
                     const error = await response.json();
-                    messageOutput.textContent += `\nError: ${error.detail || 'Failed to send message'}\n`;
+                    messageOutput.textContent += `\n❌ Error: ${error.detail || 'Failed to send message'}\n`;
                     return;
                 }
+
+                // Add assistant response header
+                messageOutput.textContent += `\n🤖 Assistant: `;
+                let assistantContent = '';
+                let lastEventType = null;
 
                 // Read the streaming response
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
-                let streamTimeout;
 
                 while (true) {
-                    const readPromise = reader.read();
-
                     const { done, value } = await reader.read();
                     
                     if (done) break;
@@ -1679,20 +1685,60 @@
                                 const jsonStr = line.substring(6).trim();
                                 if (jsonStr) {
                                     const data = JSON.parse(jsonStr);
-
-                                    // Handle different message types from Goose API
+                                    
+                                    // Handle different event types from Goose API
                                     if (data.type === 'message' && data.content) {
-                                        messageOutput.textContent += data.content.content || '';
-                                    } else if (data.content && typeof data.content === 'string') {
-                                        messageOutput.textContent += data.content;
-                                    } else if (data.error) {
-                                        messageOutput.textContent += `\nError: ${data.error}\n`;
+                                        const role = data.content.role;
+                                        const content = data.content.content || '';
+                                        
+                                        if (role === 'Assistant') {
+                                            messageOutput.textContent += content;
+                                            assistantContent += content;
+                                        }
+                                    } else if (data.type === 'tool_notification' && data.content) {
+                                        // Show tool usage
+                                        const toolInfo = data.content;
+                                        if (lastEventType !== 'tool_notification') {
+                                            messageOutput.textContent += `\n\n🔧 Tool Usage:\n`;
+                                        }
+                                        
+                                        if (toolInfo.method) {
+                                            messageOutput.textContent += `  • ${toolInfo.method}`;
+                                            if (toolInfo.params) {
+                                                const params = typeof toolInfo.params === 'object' ? 
+                                                    JSON.stringify(toolInfo.params, null, 2) : toolInfo.params;
+                                                messageOutput.textContent += `\n    Parameters: ${params}`;
+                                            }
+                                            messageOutput.textContent += `\n`;
+                                        } else {
+                                            messageOutput.textContent += `  • ${JSON.stringify(toolInfo, null, 2)}\n`;
+                                        }
+                                        
+                                        lastEventType = 'tool_notification';
+                                    } else if (data.type === 'complete') {
+                                        // Response completed
+                                        if (assistantContent && lastEventType !== 'complete') {
+                                            messageOutput.textContent += `\n\n✅ Response completed.\n`;
+                                        }
+                                        lastEventType = 'complete';
+                                        break;
+                                    } else if (data.type === 'error') {
+                                        messageOutput.textContent += `\n\n❌ Error: ${data.content.message || data.content}\n`;
+                                        lastEventType = 'error';
+                                    } else if (data.type === 'history_update') {
+                                        messageOutput.textContent += `\n\n🔄 Conversation updated (${data.content.message_count} messages)\n`;
+                                        lastEventType = 'history_update';
+                                    }
+                                    
+                                    // Update last event type for proper formatting
+                                    if (data.type && data.type !== lastEventType && data.type !== 'complete') {
+                                        lastEventType = data.type;
                                     }
                                 }
                             } catch (e) {
                                 // If not JSON, treat as raw text
                                 const text = line.substring(6).trim();
-                                if (text) {
+                                if (text && text !== '{}') {
                                     messageOutput.textContent += text;
                                 }
                             }
@@ -1702,11 +1748,10 @@
                     messageOutput.scrollTop = messageOutput.scrollHeight;
                 }
 
-                if (streamTimeout) clearTimeout(streamTimeout);
                 messageInput.value = '';
                 
             } catch (error) {
-                messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
+                messageOutput.textContent += `\n\n❌ Network Error: ${error.message}\n`;
             } finally {
                 // This ALWAYS runs - critical for spinner cleanup
                 sendMessageBtn.disabled = false;
@@ -1752,6 +1797,60 @@
             }
         }
 
+        async function loadSessionHistory(projectId, sessionId) {
+            const messageOutput = document.getElementById('message-output');
+            
+            try {
+                // Show loading indicator
+                messageOutput.textContent = '📋 Loading previous messages...';
+                
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}/sessions/${sessionId}/messages`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const messages = data.messages || [];
+                    
+                    // Clear output and display message history
+                    messageOutput.textContent = '';
+                    
+                    if (messages.length === 0) {
+                        messageOutput.textContent = `📝 Session History\n\n💭 No previous messages in this session.\n\n✨ Ready to start a new conversation!`;
+                    } else {
+                        messageOutput.textContent = `📝 Session History (${messages.length} messages)\n\n`;
+                        
+                        // Display each message with proper formatting
+                        messages.forEach((message, index) => {
+                            const role = message.role;
+                            const content = message.content;
+                            const timestamp = message.timestamp ? 
+                                new Date(message.timestamp * 1000).toLocaleTimeString() : 
+                                'Unknown time';
+                            
+                            // Format based on role
+                            if (role === 'User') {
+                                messageOutput.textContent += `🧑 User (${timestamp}): ${content}\n\n`;
+                            } else if (role === 'Assistant') {
+                                messageOutput.textContent += `🤖 Assistant (${timestamp}): ${content}\n\n`;
+                            } else {
+                                messageOutput.textContent += `${role} (${timestamp}): ${content}\n\n`;
+                            }
+                        });
+                        
+                        messageOutput.textContent += `───────────────────────────\n\n✨ Ready to continue the conversation!`;
+                    }
+                } else {
+                    const error = await response.json();
+                    messageOutput.textContent = `Could not load history. You can still send new messages.`;
+                }
+                
+            } catch (error) {
+                messageOutput.textContent = `Could not load history. You can still send new messages.`;
+            }
+            
+            // Auto-scroll to bottom
+            messageOutput.scrollTop = messageOutput.scrollHeight;
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -1765,6 +1864,7 @@
         window.createSessionForProject = createSessionForProject;
         window.selectSession = selectSession;
         window.deleteSession = deleteSession;
+        window.openGitHubKeyModal = openGitHubKeyModal;
         window.closeAlert = closeAlert;
     </script>
 </body>

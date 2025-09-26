@@ -234,6 +234,59 @@ async def delete_session(user_id: str, project_id: str, session_id: str):
     
     return {"message": "Session deleted successfully"}
 
+@router.get("/users/{user_id}/projects/{project_id}/sessions/{session_id}/messages")
+async def get_session_messages(user_id: str, project_id: str, session_id: str):
+    """Get message history for a session"""
+    # Check if project exists and user has access
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project is not active")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    # Verify session exists in project
+    sessions = project.get("sessions", [])
+    session_exists = any(s["session_id"] == session_id for s in sessions)
+    if not session_exists:
+        raise HTTPException(status_code=404, detail="Session not found in project")
+    
+    try:
+        # Forward to Goose API to get message history
+        goose_url = f"http://{endpoint}/api/v1/sessions/{session_id}/messages"
+        print(f"Fetching message history from: {goose_url}")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(goose_url)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                # Session not found in Goose API, return empty
+                return {
+                    "session_id": session_id,
+                    "messages": [],
+                    "total_count": 0
+                }
+            else:
+                error_text = response.text
+                raise HTTPException(
+                    status_code=response.status_code, 
+                    detail=f"Goose API returned {response.status_code}: {error_text}"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch message history: {str(e)}")
+
 @router.post("/users/{user_id}/projects/{project_id}/messages")
 async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
     """Send message to a specific session and stream the response"""

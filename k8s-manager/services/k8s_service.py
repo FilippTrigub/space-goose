@@ -199,7 +199,7 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
             if e.status == 404:
                 # Secret doesn't exist, create it
                 secret_data = {
-                    "GITHUB_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
                 }
                 secret_body = client.V1Secret(
                     metadata=client.V1ObjectMeta(
