@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>K8s Environment Manager</title>
+    <title>Space Goose CLI</title>
     <style>
         :root {
             --primary: #2563eb;
@@ -148,6 +148,17 @@
             margin-bottom: 2rem;
         }
 
+        .content-header-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 2rem;
+        }
+
+        .content-title-section {
+            flex: 1;
+        }
+
         .content-title {
             font-size: 1.875rem;
             font-weight: 700;
@@ -161,6 +172,12 @@
         .content-subtitle {
             color: rgba(255, 255, 255, 0.8);
             font-size: 1rem;
+        }
+
+        .alert-container {
+            min-width: 300px;
+            display: flex;
+            justify-content: flex-end;
         }
 
         /* Projects Grid */
@@ -394,12 +411,12 @@
             border-color: var(--primary);
             color: var(--primary);
         }
-        
+
         .project-card.loading {
             position: relative;
             pointer-events: none;
         }
-        
+
         .loading-overlay {
             position: absolute;
             top: 0;
@@ -414,7 +431,7 @@
             border-radius: var(--radius-lg);
             z-index: 100;
         }
-        
+
         .activation-spinner {
             width: 32px;
             height: 32px;
@@ -424,7 +441,7 @@
             animation: spin 1s linear infinite;
             margin-bottom: 0.75rem;
         }
-        
+
         .activation-status {
             font-size: 0.875rem;
             color: var(--text-primary);
@@ -718,6 +735,21 @@
                 padding: 1rem;
             }
 
+            .content-header-row {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .alert-container {
+                min-width: auto;
+                justify-content: flex-start;
+            }
+
+            .alert {
+                min-width: 250px;
+                max-width: 100%;
+            }
+
             .projects-grid {
                 grid-template-columns: 1fr;
             }
@@ -755,11 +787,16 @@
         <!-- Main Content -->
         <main class="main-content">
             <div class="content-header">
-                <h2 class="content-title">
-                    <span id="current-user-name">Select a user to continue</span>
-                    📦 Projects
-                </h2>
-                <p class="content-subtitle">Manage your Kubernetes environments and chat with AI assistants</p>
+                <div class="content-header-row">
+                    <div class="content-title-section">
+                        <h2 class="content-title">
+                            <span id="current-user-name">Select a user to continue</span>
+                            📦 Projects
+                        </h2>
+                        <p class="content-subtitle">Manage your Kubernetes environments and chat with AI assistants</p>
+                    </div>
+                    <div class="alert-container" id="alert-container"></div>
+                </div>
             </div>
 
             <!-- Projects Grid -->
@@ -1358,6 +1395,11 @@
             const message = messageInput.value.trim();
             if (!message) return;
 
+            // Setup timeout and abort controller
+            const controller = new AbortController();
+            const TIMEOUT_MS = 25000; // 25 seconds
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
             try {
                 sendMessageBtn.disabled = true;
                 messageInput.disabled = true;
@@ -1369,8 +1411,11 @@
                 const response = await fetch(`/users/${currentUser}/projects/${activeProject}/messages`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: message, session_id: currentSession })
+                    body: JSON.stringify({ content: message, session_id: currentSession }),
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
 
                 if (!response.ok) {
                     const error = await response.json();
@@ -1378,12 +1423,23 @@
                     return;
                 }
 
-                // Read the streaming response
+                // Read the streaming response with timeout protection
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
+                let streamTimeout;
 
                 while (true) {
-                    const { done, value } = await reader.read();
+                    // Clear previous stream timeout
+                    if (streamTimeout) clearTimeout(streamTimeout);
+                    
+                    // Set timeout for this read operation
+                    const readPromise = reader.read();
+                    const timeoutPromise = new Promise((_, reject) => {
+                        streamTimeout = setTimeout(() => reject(new Error('Stream read timeout')), 10000);
+                    });
+
+                    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+                    
                     if (done) break;
 
                     const chunk = decoder.decode(value, { stream: true });
@@ -1419,10 +1475,21 @@
                     messageOutput.scrollTop = messageOutput.scrollHeight;
                 }
 
+                if (streamTimeout) clearTimeout(streamTimeout);
                 messageInput.value = '';
+                
             } catch (error) {
-                messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
+                clearTimeout(timeoutId);
+                
+                if (error.name === 'AbortError') {
+                    messageOutput.textContent += `\nError: Request timed out\n`;
+                } else if (error.message === 'Stream read timeout') {
+                    messageOutput.textContent += `\nError: Stream reading timed out\n`;
+                } else {
+                    messageOutput.textContent += `\nError: Failed to send message - ${error.message}\n`;
+                }
             } finally {
+                // This ALWAYS runs - critical for spinner cleanup
                 sendMessageBtn.disabled = false;
                 messageInput.disabled = false;
                 spinner.style.display = 'none';
