@@ -7,6 +7,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi_mcp import FastApiMCP
+
 from routes import project_routes
 
 app = FastAPI(
@@ -35,6 +37,33 @@ async def read_root(request: Request):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+mcp = FastApiMCP(
+    app,
+    name="Space Goose MCP",
+    description="Control remote goose coding agents",
+    describe_all_responses=True,
+    describe_full_response_schema=True,
+    include_operations=[
+        "get_user_projects",
+        "create_project",
+        "update_project",
+        "delete_project",
+        "activate_project",
+        "deactivate_project",
+        "update_project_github_key",
+        "create_session",
+        "get_all_project_sessions",
+        "get_session_messages",
+        "send_message",
+        "get_all_project_settings",
+        "get_specific_project_setting",
+        "update_project_setting", 
+        "reset_project_settings",
+        "update_project_settings_in_bulk"
+    ]
+)
+mcp.mount_http()
 
 if __name__ == "__main__":
     uvicorn.run(
