@@ -898,7 +898,7 @@
                         <input type="text" id="project-name-input" placeholder="Enter a descriptive project name...">
                     </div>
                     <div class="form-group">
-                        <label for="github-key-input">GitHub Token (Optional)</label>
+                        <label for="github-key-input">GitHub Token</label>
                         <input type="password" id="github-key-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
                         <small class="form-help">GitHub personal access token for private repositories</small>
                     </div>
@@ -1020,6 +1020,32 @@
                 </div>
             </div>
         </div>
+
+        <!-- Settings Management Modal -->
+        <div class="modal-overlay" id="settings-modal">
+            <div class="modal" style="max-width: 900px;">
+                <div class="modal-header">
+                    <h3 id="settings-modal-title">⚙️ Project Settings</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-toolbar"
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                        <div class="settings-count" id="settings-count">Loading settings...</div>
+                        <button class="btn btn-success btn-xs" id="reset-all-settings-btn">🔄 Reset All to Defaults</button>
+                    </div>
+                    <div class="settings-list" id="settings-list" style="max-height: 500px; overflow-y: auto;">
+                        <!-- Settings will be loaded here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" id="close-settings-btn">Close</button>
+                    <button class="btn btn-primary" id="save-all-settings-btn">
+                        <span class="spinner" style="display: none;"></span>
+                        Save All Changes
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -1029,11 +1055,290 @@
         let projects = [];
         let currentGitHubKeyProjectId = null;
         let currentExtensionsProjectId = null;
+        let currentSettingsProjectId = null;
         let projectExtensions = [];
+        let projectSettings = [];
+        let settingsChanges = {}; // Track pending changes
 
         document.addEventListener('DOMContentLoaded', async () => {
             await initializeApp();
         });
+
+        function setupSettingsModalHandlers() {
+            const modal = document.getElementById('settings-modal');
+            const closeBtn = document.getElementById('close-settings-btn');
+            const saveAllBtn = document.getElementById('save-all-settings-btn');
+            const resetAllBtn = document.getElementById('reset-all-settings-btn');
+
+            closeBtn.addEventListener('click', () => {
+                closeSettingsModal();
+            });
+
+            saveAllBtn.addEventListener('click', async () => {
+                await saveAllSettings();
+            });
+
+            resetAllBtn.addEventListener('click', async () => {
+                if (confirm('Are you sure you want to reset all settings to their defaults?')) {
+                    await resetAllSettings();
+                }
+            });
+
+            // Close modal on overlay click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeSettingsModal();
+            });
+        }
+
+        // Settings Management Functions
+        function openSettingsModal(projectId) {
+            if (!currentUser) {
+                showAlert('Please select a user first', 'error');
+                return;
+            }
+
+            const project = projects.find(p => p.id === projectId);
+            if (!project || project.status !== 'active') {
+                showAlert('Project must be active to manage settings', 'error');
+                return;
+            }
+
+            currentSettingsProjectId = projectId;
+            const modal = document.getElementById('settings-modal');
+            const title = document.getElementById('settings-modal-title');
+
+            title.textContent = `⚙️ Settings - ${project.name}`;
+            modal.classList.add('active');
+
+            // Reset changes tracker
+            settingsChanges = {};
+
+            loadProjectSettings(projectId);
+        }
+
+        function closeSettingsModal() {
+            const modal = document.getElementById('settings-modal');
+            modal.classList.remove('active');
+            currentSettingsProjectId = null;
+            settingsChanges = {};
+        }
+
+        async function loadProjectSettings(projectId) {
+            const settingsList = document.getElementById('settings-list');
+            const settingsCount = document.getElementById('settings-count');
+
+            try {
+                settingsList.innerHTML = '🔄 Loading settings...';
+                settingsCount.textContent = 'Loading...';
+
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}/settings`);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    projectSettings = data.settings || [];
+
+                    renderSettingsList();
+                    settingsCount.textContent = `${projectSettings.length} settings`;
+                } else {
+                    const error = await response.json();
+                    settingsList.innerHTML = `❌ Failed to load settings: ${error.detail}`;
+                    settingsCount.textContent = 'Error';
+                }
+            } catch (error) {
+                settingsList.innerHTML = `❌ Error: ${error.message}`;
+                settingsCount.textContent = 'Error';
+            }
+        }
+
+        function renderSettingsList() {
+            const settingsList = document.getElementById('settings-list');
+
+            if (projectSettings.length === 0) {
+                settingsList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⚙️</div>
+                        <h3>No Settings</h3>
+                        <p>No configurable settings available.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const settingsHtml = projectSettings.map(setting => {
+                const isOverridden = setting.env_override !== null;
+                const hasChanges = settingsChanges.hasOwnProperty(setting.key);
+                const currentValue = hasChanges ? settingsChanges[setting.key] : setting.value;
+                const displayValue = currentValue !== null ? currentValue : setting.default_value;
+
+                // Create input based on setting type
+                let inputHtml = '';
+                if (setting.validation && setting.validation.allowed_values) {
+                    // Dropdown for enum values
+                    const options = setting.validation.allowed_values.map(val => 
+                        `<option value="${val}" ${displayValue === val ? 'selected' : ''}>${val}</option>`
+                    ).join('');
+                    inputHtml = `<select onchange="updateSettingValue('${setting.key}', this.value)" ${isOverridden ? 'disabled' : ''}>${options}</select>`;
+                } else if (setting.value_type === 'number') {
+                    // Number input
+                    const min = setting.validation?.min || '';
+                    const max = setting.validation?.max || '';
+                    const step = setting.key === 'GOOSE_TEMPERATURE' || setting.key === 'GOOSE_CLI_MIN_PRIORITY' ? '0.1' : '1';
+                    inputHtml = `<input type="number" value="${displayValue || ''}" min="${min}" max="${max}" step="${step}" onchange="updateSettingValue('${setting.key}', this.value)" ${isOverridden ? 'disabled' : ''}>`;
+                } else {
+                    // Text input
+                    inputHtml = `<input type="text" value="${displayValue || ''}" onchange="updateSettingValue('${setting.key}', this.value)" ${isOverridden ? 'disabled' : ''}>`;
+                }
+
+                return `
+                    <div class="setting-item" style="display: flex; align-items: flex-start; justify-content: space-between; padding: 1rem; margin: 0.5rem 0; background: var(--bg-secondary); border-radius: var(--radius); border: 1px solid ${hasChanges ? 'var(--warning)' : 'var(--border)'};">
+                        <div class="setting-info" style="flex: 1; margin-right: 1rem;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                <h4 style="margin: 0; font-size: 1rem; font-weight: 600;">${setting.key}</h4>
+                                ${setting.restart_required ? '<span style="padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 500; background: var(--warning); color: white;">⚠️ Restart Required</span>' : ''}
+                                ${isOverridden ? '<span style="padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 500; background: var(--secondary); color: white;">🔒 ENV Override</span>' : ''}
+                                ${hasChanges ? '<span style="padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 500; background: var(--warning); color: white;">📝 Modified</span>' : ''}
+                            </div>
+                            <div style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${setting.description}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">
+                                Type: ${setting.value_type} | Default: ${setting.default_value !== null ? setting.default_value : 'None'}
+                                ${isOverridden ? `<br>Environment Override: ${setting.env_override}` : ''}
+                            </div>
+                        </div>
+                        <div class="setting-controls" style="display: flex; flex-direction: column; gap: 0.5rem; min-width: 200px;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                ${inputHtml}
+                                <button class="btn btn-outline btn-xs" onclick="resetSetting('${setting.key}')" ${isOverridden ? 'disabled' : ''} title="Reset to default">
+                                    🔄
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            settingsList.innerHTML = settingsHtml;
+        }
+
+        function updateSettingValue(key, value) {
+            // Convert value to appropriate type
+            const setting = projectSettings.find(s => s.key === key);
+            if (!setting) return;
+
+            let convertedValue = value;
+            if (setting.value_type === 'number') {
+                convertedValue = parseFloat(value);
+                if (isNaN(convertedValue)) {
+                    showAlert('Invalid number format', 'error');
+                    return;
+                }
+            }
+
+            // Store the change
+            settingsChanges[key] = convertedValue;
+
+            // Re-render to show modified state
+            renderSettingsList();
+        }
+
+        async function resetSetting(key) {
+            try {
+                const response = await fetch(`/users/${currentUser}/projects/${currentSettingsProjectId}/settings/${key}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                    
+                    // Remove from pending changes
+                    delete settingsChanges[key];
+                    
+                    // Reload settings to get updated values
+                    await loadProjectSettings(currentSettingsProjectId);
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to reset setting', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to reset setting', 'error');
+            }
+        }
+
+        async function saveAllSettings() {
+            const saveBtn = document.getElementById('save-all-settings-btn');
+            const spinner = saveBtn.querySelector('.spinner');
+
+            if (Object.keys(settingsChanges).length === 0) {
+                showAlert('No changes to save', 'error');
+                return;
+            }
+
+            try {
+                saveBtn.disabled = true;
+                spinner.style.display = 'inline-block';
+
+                const response = await fetch(`/users/${currentUser}/projects/${currentSettingsProjectId}/settings`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ settings: settingsChanges })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                    
+                    // Clear pending changes
+                    settingsChanges = {};
+                    
+                    // Reload settings
+                    await loadProjectSettings(currentSettingsProjectId);
+                    
+                    // Check if restart required
+                    if (result.result?.restart_required) {
+                        showAlert('Some settings require a server restart to take effect', 'error');
+                    }
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to save settings', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to save settings', 'error');
+            } finally {
+                saveBtn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+
+        async function resetAllSettings() {
+            // Reset all non-environment-overridden settings
+            const resetableSettings = projectSettings.filter(s => s.env_override === null);
+            
+            if (resetableSettings.length === 0) {
+                showAlert('No settings can be reset (all are overridden by environment variables)', 'error');
+                return;
+            }
+
+            try {
+                for (const setting of resetableSettings) {
+                    const response = await fetch(`/users/${currentUser}/projects/${currentSettingsProjectId}/settings/${setting.key}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (!response.ok) {
+                        console.warn(`Failed to reset ${setting.key}`);
+                    }
+                }
+
+                showAlert(`Reset ${resetableSettings.length} settings to defaults`, 'success');
+                
+                // Clear pending changes and reload
+                settingsChanges = {};
+                await loadProjectSettings(currentSettingsProjectId);
+                
+            } catch (error) {
+                showAlert('Failed to reset all settings', 'error');
+            }
+        }
 
         async function initializeApp() {
             const userSelect = document.getElementById('user-select');
@@ -1105,6 +1410,7 @@
             setupModalHandlers();
             setupGitHubKeyModalHandlers();
             setupExtensionsModalHandlers();
+            setupSettingsModalHandlers();
         }
 
         function setupGitHubKeyModalHandlers() {
@@ -1302,6 +1608,9 @@
                             <button class="btn btn-outline" onclick="openExtensionsModal('${project.id}')" ${!isActive ? 'disabled' : ''}>
                                 🧩 Extensions
                             </button>
+                            <button class="btn btn-outline" onclick="openSettingsModal('${project.id}')" ${!isActive ? 'disabled' : ''}>
+                                ⚙️ Settings
+                            </button>
                         </div>
                     </div>
                 `;
@@ -1324,6 +1633,10 @@
             confirmBtn.addEventListener('click', async () => {
                 const name = projectNameInput.value.trim();
                 const githubKey = document.getElementById('github-key-input').value.trim();
+                if (!githubKey) {
+                    showAlert('Please enter a github PAT', 'error');
+                    return;
+                }
                 if (!name) {
                     showAlert('Please enter a project name', 'error');
                     return;
@@ -1336,14 +1649,30 @@
             projectNameInput.addEventListener('keypress', async (e) => {
                 if (e.key === 'Enter') {
                     const name = projectNameInput.value.trim();
-                    if (name) await createProject(name);
+                    if (!githubKey) {
+                        showAlert('Please enter a github PAT', 'error');
+                        return;
+                    }
+                    if (!name) {
+                        showAlert('Please enter a project name', 'error');
+                        return;
+                    }
+                    await createProject(name);
                 }
             });
 
             document.getElementById('github-key-input').addEventListener('keypress', async (e) => {
                 if (e.key === 'Enter') {
                     const name = projectNameInput.value.trim();
-                    if (name) await createProject(name);
+                if (!githubKey) {
+                    showAlert('Please enter a github PAT', 'error');
+                    return;
+                }
+                if (!name) {
+                    showAlert('Please enter a project name', 'error');
+                    return;
+                }
+                await createProject(name);
                 }
             });
 
@@ -2299,8 +2628,11 @@
         window.deleteSession = deleteSession;
         window.openGitHubKeyModal = openGitHubKeyModal;
         window.openExtensionsModal = openExtensionsModal;
+        window.openSettingsModal = openSettingsModal;
         window.toggleExtension = toggleExtension;
         window.deleteExtension = deleteExtension;
+        window.updateSettingValue = updateSettingValue;
+        window.resetSetting = resetSetting;
         window.closeAlert = closeAlert;
     </script>
 </body>

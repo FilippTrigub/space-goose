@@ -365,8 +365,6 @@ def get_project_endpoint(user_id: str, project_id: str):
     """
     Get the LoadBalancer IP for a project service.
     """
-    if os.getenv('DEV_ENV'):
-        return 'localhost:3001'
     namespace = f"user-{user_id}"
     service_name = f"proj-{project_id}-api"
     
