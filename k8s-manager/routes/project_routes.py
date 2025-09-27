@@ -6,7 +6,7 @@ import httpx
 import asyncio
 from datetime import datetime
 
-from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey, Extension, ExtensionCreate, ExtensionToggle
+from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey, Extension, ExtensionCreate, ExtensionToggle, SettingUpdate
 from services import mongodb_service, k8s_service
 
 router = APIRouter()
@@ -203,6 +203,7 @@ async def create_session(user_id: str, project_id: str, session: SessionCreate):
 @router.get("/users/{user_id}/projects/{project_id}/sessions")
 async def get_project_sessions(user_id: str, project_id: str):
     """Get all sessions for a project"""
+    print(f'getting session with user {user_id} and project {project_id}')
     project = mongodb_service.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -559,3 +560,222 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
         raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to proxy message: {str(e)}")
+
+# Settings Management Endpoints
+
+@router.get("/users/{user_id}/projects/{project_id}/settings")
+async def get_project_settings(user_id: str, project_id: str):
+    """Get all settings for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to manage settings")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/settings"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(goose_url)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                error_text = response.text
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Goose API returned {response.status_code}: {error_text}"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch settings: {str(e)}")
+
+@router.get("/users/{user_id}/projects/{project_id}/settings/{setting_key}")
+async def get_project_setting(user_id: str, project_id: str, setting_key: str):
+    """Get a specific setting for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to view settings")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/settings/{setting_key}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(goose_url)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Setting not found")
+            else:
+                error_text = response.text
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Goose API returned {response.status_code}: {error_text}"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch setting: {str(e)}")
+
+@router.put("/users/{user_id}/projects/{project_id}/settings/{setting_key}")
+async def update_project_setting(user_id: str, project_id: str, setting_key: str, setting_data: SettingUpdate):
+    """Update a specific setting for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to update settings")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/settings/{setting_key}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.put(
+                goose_url,
+                json=setting_data.dict()
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "message": f"Setting {setting_key} updated successfully",
+                    "setting": result,
+                    "restart_required": result.get("restart_required", False)
+                }
+            elif response.status_code == 400:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=400,
+                    detail=error_data.get("message") or error_data.get("detail") or "Invalid setting value"
+                )
+            elif response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Setting not found")
+            else:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Failed to update setting"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update setting: {str(e)}")
+
+@router.delete("/users/{user_id}/projects/{project_id}/settings/{setting_key}")
+async def reset_project_setting(user_id: str, project_id: str, setting_key: str):
+    """Reset a setting to its default value for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to reset settings")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/settings/{setting_key}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(goose_url)
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "message": f"Setting {setting_key} reset to default successfully",
+                    "setting": result
+                }
+            elif response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Setting not found")
+            elif response.status_code == 400:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=400,
+                    detail=error_data.get("message") or "Cannot reset setting (may be overridden by environment variable)"
+                )
+            else:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Failed to reset setting"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset setting: {str(e)}")
+
+@router.put("/users/{user_id}/projects/{project_id}/settings")
+async def update_project_settings_bulk(user_id: str, project_id: str, settings_data: dict):
+    """Bulk update multiple settings for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to update settings")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/settings"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.put(
+                goose_url,
+                json=settings_data
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "message": f"Bulk settings update completed: {result.get('success_count', 0)}/{result.get('total_count', 0)} settings updated",
+                    "result": result
+                }
+            else:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Failed to update settings"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")

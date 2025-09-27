@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 
 class ProjectCreate(BaseModel):
@@ -71,3 +71,6 @@ class ExtensionToggle(BaseModel):
 class MessageRequest(BaseModel):
     content: str
     session_id: str
+
+class SettingUpdate(BaseModel):
+    value: Any  # Can be string, number, or boolean
