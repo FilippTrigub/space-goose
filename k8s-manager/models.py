@@ -5,6 +5,7 @@ from datetime import datetime
 class ProjectCreate(BaseModel):
     name: str
     github_key: Optional[str] = None
+    use_global_github_key: Optional[bool] = True
 
 class ProjectUpdate(BaseModel):
     name: str
@@ -25,6 +26,7 @@ class Project(BaseModel):
     status: str  # active, inactive
     endpoint: Optional[str] = None
     github_key_set: Optional[bool] = False
+    github_key_source: Optional[str] = None  # "project" or "user"
     sessions: Optional[List[Session]] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -32,6 +34,9 @@ class Project(BaseModel):
 class User(BaseModel):
     id: str
     name: str
+
+class UserGitHubKey(BaseModel):
+    github_key: str
 
 class ProjectUpdateGitHubKey(BaseModel):
     github_key: Optional[str] = None
