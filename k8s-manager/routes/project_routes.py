@@ -6,7 +6,7 @@ import httpx
 import asyncio
 from datetime import datetime
 
-from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey, Extension, ExtensionCreate, ExtensionToggle, SettingUpdate
+from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey, UserGitHubKey, Extension, ExtensionCreate, ExtensionToggle, SettingUpdate
 from services import mongodb_service, k8s_service
 
 router = APIRouter()
@@ -28,6 +28,7 @@ async def get_projects(user_id: str):
         "status": project["status"],
         "endpoint": project.get("endpoint"),
         "github_key_set": project.get("github_key_set", False),
+        "github_key_source": project.get("github_key_source"),
         "sessions": project.get("sessions", []),
         "created_at": project.get("created_at"),
         "updated_at": project.get("updated_at")
@@ -35,12 +36,24 @@ async def get_projects(user_id: str):
 
 @router.post("/users/{user_id}/projects", operation_id="create_project")
 async def create_project(user_id: str, project: ProjectCreate):
+    # Check if user has a global GitHub key set and project should use it
+    github_key = project.github_key
+    github_key_source = "project" if github_key else None
+    
+    if not github_key and project.use_global_github_key:
+        # Try to get user's global GitHub key
+        user_github_key = mongodb_service.get_user_github_key(user_id)
+        if user_github_key:
+            github_key = user_github_key
+            github_key_source = "user"
+
     project_data = {
         "user_id": user_id,
         "name": project.name,
         "status": "inactive",
         "sessions": [],
-        "github_key_set": bool(project.github_key),
+        "github_key_set": bool(github_key),
+        "github_key_source": github_key_source,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -49,11 +62,11 @@ async def create_project(user_id: str, project: ProjectCreate):
     
     # Create K8s resources but don't activate yet
     try:
-        k8s_service.apply_project_resources(user_id, project_id, project.github_key)
+        k8s_service.apply_project_resources(user_id, project_id, github_key)
         
         # Store GitHub key in MongoDB if provided (masked)
-        if project.github_key:
-            mongodb_service.store_github_key(project_id, project.github_key)
+        if github_key:
+            mongodb_service.store_github_key(project_id, github_key, github_key_source)
             
     except Exception as e:
         # Rollback MongoDB record if K8s fails
@@ -116,6 +129,34 @@ async def activate_project(user_id: str, project_id: str):
         return {"message": "Project activated successfully", "endpoint": endpoint}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to activate project: {str(e)}")
+
+# User-level GitHub key management
+@router.put("/users/{user_id}/github-key", operation_id="set_user_github_key")
+async def set_user_github_key(user_id: str, github_key_data: UserGitHubKey):
+    """Set a global GitHub key for a user"""
+    try:
+        mongodb_service.store_user_github_key(user_id, github_key_data.github_key)
+        return {"message": "GitHub key set successfully for user"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to set user GitHub key: {str(e)}")
+
+@router.get("/users/{user_id}/github-key", operation_id="get_user_github_key")
+async def get_user_github_key(user_id: str):
+    """Check if a user has a global GitHub key set"""
+    try:
+        key_status = mongodb_service.get_user_github_key_status(user_id)
+        return key_status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user GitHub key status: {str(e)}")
+
+@router.delete("/users/{user_id}/github-key", operation_id="delete_user_github_key")
+async def delete_user_github_key(user_id: str):
+    """Delete a user's global GitHub key"""
+    try:
+        mongodb_service.delete_user_github_key(user_id)
+        return {"message": "GitHub key deleted successfully for user"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete user GitHub key: {str(e)}")
 
 @router.put("/users/{user_id}/projects/{project_id}/github-key", operation_id="update_project_github_key")
 async def update_project_github_key(user_id: str, project_id: str, github_key_data: ProjectUpdateGitHubKey):
