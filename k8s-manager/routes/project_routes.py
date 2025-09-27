@@ -6,7 +6,7 @@ import httpx
 import asyncio
 from datetime import datetime
 
-from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey
+from models import ProjectCreate, ProjectUpdate, Project, User, MessageRequest, SessionCreate, Session, ProjectUpdateGitHubKey, Extension, ExtensionCreate, ExtensionToggle
 from services import mongodb_service, k8s_service
 
 router = APIRouter()
@@ -286,6 +286,206 @@ async def get_session_messages(user_id: str, project_id: str, session_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch message history: {str(e)}")
+
+# Extension Management Endpoints
+
+@router.get("/users/{user_id}/projects/{project_id}/extensions")
+async def get_project_extensions(user_id: str, project_id: str):
+    """Get all extensions for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to manage extensions")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/extensions"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(goose_url)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                error_text = response.text
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Goose API returned {response.status_code}: {error_text}"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch extensions: {str(e)}")
+
+@router.post("/users/{user_id}/projects/{project_id}/extensions")
+async def create_project_extension(user_id: str, project_id: str, extension: ExtensionCreate):
+    """Create a new extension for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to create extensions")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        # Prepare extension data for Goose API
+        extension_data = {
+            "name": extension.name,
+            "type": extension.extension_type,  # Use 'type' not 'extension_type'
+            "description": extension.description
+        }
+        
+        if extension.extension_type == "stdio":
+            extension_data["cmd"] = "npx"  # Fixed command
+            if extension.args:
+                if "-y" not in extension.args:
+                    extension.args.insert(0, "-y")
+                extension_data["args"] = extension.args
+            if extension.envs:
+                extension_data["envs"] = extension.envs
+        elif extension.extension_type == "streamable_http":
+            if not extension.uri:
+                raise HTTPException(status_code=400, detail="URI is required for HTTP extensions")
+            extension_data["uri"] = extension.uri
+            if extension.envs:
+                extension_data["envs"] = extension.envs
+        
+        # Create extension in Goose API first
+        goose_url = f"http://{endpoint}/api/v1/extensions"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                goose_url,
+                json=extension_data
+            )
+            
+            if response.status_code != 201:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Failed to create extension"
+                )
+        
+        # If extension has environment variables, update K8s deployment
+        if extension.envs:
+            await update_project_env_vars(user_id, project_id, extension.envs)
+            
+        return {"message": "Extension created successfully. Pod restarting with new environment variables." if extension.envs else "Extension created successfully"}
+    
+    except HTTPException:
+        raise
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create extension: {str(e)}")
+
+async def update_project_env_vars(user_id: str, project_id: str, env_vars: dict):
+    """Update environment variables for a project and restart deployment"""
+    try:
+        # Update K8s deployment with new environment variables
+        k8s_service.update_deployment_env_vars(user_id, project_id, env_vars)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update environment variables: {str(e)}")
+
+@router.put("/users/{user_id}/projects/{project_id}/extensions/{extension_name}/toggle")
+async def toggle_project_extension(user_id: str, project_id: str, extension_name: str, toggle_data: ExtensionToggle):
+    """Toggle extension enabled/disabled for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to toggle extensions")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/extensions/{extension_name}/toggle"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.put(
+                goose_url,
+                json=toggle_data.dict()
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                action = "enabled" if toggle_data.enabled else "disabled"
+                return {"message": f"Extension {action} successfully", "extension": result}
+            else:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Failed to toggle extension"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to toggle extension: {str(e)}")
+
+@router.delete("/users/{user_id}/projects/{project_id}/extensions/{extension_name}")
+async def delete_project_extension(user_id: str, project_id: str, extension_name: str):
+    """Delete an extension from a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project must be active to delete extensions")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    try:
+        goose_url = f"http://{endpoint}/api/v1/extensions/{extension_name}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(goose_url)
+            
+            if response.status_code == 204:
+                return {"message": "Extension deleted successfully"}
+            elif response.status_code == 404:
+                raise HTTPException(status_code=404, detail="Extension not found")
+            elif response.status_code == 400:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=400,
+                    detail=error_data.get("message") or "Cannot delete enabled extension. Disable it first."
+                )
+            else:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Failed to delete extension"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete extension: {str(e)}")
 
 @router.post("/users/{user_id}/projects/{project_id}/messages")
 async def proxy_message(user_id: str, project_id: str, message: MessageRequest):

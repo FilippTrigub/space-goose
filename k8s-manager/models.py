@@ -36,6 +36,38 @@ class User(BaseModel):
 class ProjectUpdateGitHubKey(BaseModel):
     github_key: Optional[str] = None
 
+class Extension(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    extension_type: str  # builtin, stdio, sse, streamable_http, frontend, inline_python
+    enabled: bool
+    timeout: Optional[int] = None
+    description: Optional[str] = None
+    # Type-specific fields
+    cmd: Optional[str] = None
+    args: Optional[List[str]] = None
+    bundled: Optional[bool] = None
+    uri: Optional[str] = None
+    python_code: Optional[str] = None
+    envs: Optional[dict] = None
+    env_keys: Optional[List[str]] = None
+    headers: Optional[dict] = None
+
+class ExtensionCreate(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    extension_type: str  # stdio, streamable_http
+    description: Optional[str] = None
+    # For stdio extensions (npx only)
+    args: Optional[List[str]] = None
+    # For http extensions
+    uri: Optional[str] = None
+    # Environment variables for K8s pod
+    envs: Optional[dict] = None
+
+class ExtensionToggle(BaseModel):
+    enabled: bool
+
 class MessageRequest(BaseModel):
     content: str
     session_id: str

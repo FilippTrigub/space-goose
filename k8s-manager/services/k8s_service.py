@@ -365,6 +365,8 @@ def get_project_endpoint(user_id: str, project_id: str):
     """
     Get the LoadBalancer IP for a project service.
     """
+    if os.getenv('DEV_ENV'):
+        return 'localhost:3001'
     namespace = f"user-{user_id}"
     service_name = f"proj-{project_id}-api"
     
@@ -569,6 +571,58 @@ def update_github_secret(user_id: str, project_id: str, github_key: str = None):
             print(f"⚠ Warning: Could not restart deployment {deployment_name}: {e}")
     except Exception as e:
         print(f"⚠ Warning: Unexpected error restarting deployment: {e}")
+
+def update_deployment_env_vars(user_id: str, project_id: str, env_vars: dict):
+    """
+    Update environment variables for a deployment and restart it.
+    """
+    namespace = f"user-{user_id}"
+    deployment_name = f"proj-{project_id}-api"
+    
+    try:
+        # Get current deployment
+        deployment = apps_v1.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        
+        # Update environment variables in container spec
+        container = deployment.spec.template.spec.containers[0]
+        
+        # Add new environment variables
+        if not container.env:
+            container.env = []
+        
+        # Remove existing env vars with same keys, then add new ones
+        existing_env_names = {env.name for env in container.env}
+        for key, value in env_vars.items():
+            # Remove existing env var with same name
+            container.env = [env for env in container.env if env.name != key]
+            # Add new env var
+            container.env.append(client.V1EnvVar(name=key, value=str(value)))
+        
+        # Force restart by updating restart annotation
+        import time
+        if not deployment.spec.template.metadata.annotations:
+            deployment.spec.template.metadata.annotations = {}
+        deployment.spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"] = str(int(time.time()))
+        
+        # Apply the updated deployment
+        apps_v1.patch_namespaced_deployment(
+            name=deployment_name,
+            namespace=namespace,
+            body=deployment
+        )
+        
+        print(f"✓ Updated environment variables and restarted deployment {deployment_name}")
+        print(f"  Added env vars: {list(env_vars.keys())}")
+        
+    except ApiException as e:
+        if e.status == 404:
+            raise Exception(f"Deployment {deployment_name} not found in namespace {namespace}")
+        else:
+            print(f"✗ Failed to update deployment {deployment_name}: {e}")
+            raise e
+    except Exception as e:
+        print(f"✗ Unexpected error updating deployment: {e}")
+        raise e
 
 def get_k8s_status():
     """
