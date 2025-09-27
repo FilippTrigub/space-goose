@@ -18,7 +18,7 @@ users = [{"id": "user1", "name": "User 1"}, {"id": "user2", "name": "User 2"}]
 async def get_users():
     return [User(**user) for user in users]
 
-@router.get("/users/{user_id}/projects")
+@router.get("/users/{user_id}/projects", operation_id="get_user_projects")
 async def get_projects(user_id: str):
     projects = mongodb_service.list_projects(user_id)
     return [{
@@ -33,7 +33,7 @@ async def get_projects(user_id: str):
         "updated_at": project.get("updated_at")
     } for project in projects]
 
-@router.post("/users/{user_id}/projects")
+@router.post("/users/{user_id}/projects", operation_id="create_project")
 async def create_project(user_id: str, project: ProjectCreate):
     project_data = {
         "user_id": user_id,
@@ -62,7 +62,7 @@ async def create_project(user_id: str, project: ProjectCreate):
     
     return {"message": "Project created successfully", "project_id": project_id}
 
-@router.put("/users/{user_id}/projects/{project_id}")
+@router.put("/users/{user_id}/projects/{project_id}", operation_id="update_project")
 async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
     update_data = {
         "name": project.name,
@@ -73,7 +73,7 @@ async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project updated successfully"}
 
-@router.delete("/users/{user_id}/projects/{project_id}")
+@router.delete("/users/{user_id}/projects/{project_id}", operation_id="delete_project")
 async def delete_project(user_id: str, project_id: str):
     # First deactivate if active
     project = mongodb_service.get_project(project_id)
@@ -90,7 +90,7 @@ async def delete_project(user_id: str, project_id: str):
     
     return {"message": "Project deleted successfully"}
 
-@router.post("/users/{user_id}/projects/{project_id}/activate")
+@router.post("/users/{user_id}/projects/{project_id}/activate", operation_id="activate_project")
 async def activate_project(user_id: str, project_id: str):
     try:
         # Scale up deployment
@@ -117,7 +117,7 @@ async def activate_project(user_id: str, project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to activate project: {str(e)}")
 
-@router.put("/users/{user_id}/projects/{project_id}/github-key")
+@router.put("/users/{user_id}/projects/{project_id}/github-key", operation_id="update_project_github_key")
 async def update_project_github_key(user_id: str, project_id: str, github_key_data: ProjectUpdateGitHubKey):
     """Update GitHub key for an existing project"""
     # Check if project exists
@@ -141,7 +141,7 @@ async def update_project_github_key(user_id: str, project_id: str, github_key_da
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update GitHub key: {str(e)}")
 
-@router.post("/users/{user_id}/projects/{project_id}/deactivate")
+@router.post("/users/{user_id}/projects/{project_id}/deactivate", operation_id="deactivate_project")
 async def deactivate_project(user_id: str, project_id: str):
     try:
         # Scale down deployment
@@ -156,7 +156,7 @@ async def deactivate_project(user_id: str, project_id: str):
 
 # Session Management Endpoints
 
-@router.post("/users/{user_id}/projects/{project_id}/sessions")
+@router.post("/users/{user_id}/projects/{project_id}/sessions", operation_id="create_session")
 async def create_session(user_id: str, project_id: str, session: SessionCreate):
     """Create a new session in the Goose API and store it in the project"""
     # Check if project exists and is active
@@ -200,7 +200,7 @@ async def create_session(user_id: str, project_id: str, session: SessionCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {str(e)}")
 
-@router.get("/users/{user_id}/projects/{project_id}/sessions")
+@router.get("/users/{user_id}/projects/{project_id}/sessions", operation_id="get_all_project_sessions")
 async def get_project_sessions(user_id: str, project_id: str):
     """Get all sessions for a project"""
     print(f'getting session with user {user_id} and project {project_id}')
@@ -235,7 +235,7 @@ async def delete_session(user_id: str, project_id: str, session_id: str):
     
     return {"message": "Session deleted successfully"}
 
-@router.get("/users/{user_id}/projects/{project_id}/sessions/{session_id}/messages")
+@router.get("/users/{user_id}/projects/{project_id}/sessions/{session_id}/messages", operation_id="get_session_messages")
 async def get_session_messages(user_id: str, project_id: str, session_id: str):
     """Get message history for a session"""
     # Check if project exists and user has access
@@ -488,7 +488,7 @@ async def delete_project_extension(user_id: str, project_id: str, extension_name
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete extension: {str(e)}")
 
-@router.post("/users/{user_id}/projects/{project_id}/messages")
+@router.post("/users/{user_id}/projects/{project_id}/messages", operation_id="send_message")
 async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
     """Send message to a specific session and stream the response"""
     # Get project to check if active
@@ -561,9 +561,59 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to proxy message: {str(e)}")
 
-# Settings Management Endpoints
+@router.post("/users/{user_id}/projects/{project_id}/messages/send", operation_id="send_message_fire_and_forget")
+async def send_message_sync(user_id: str, project_id: str, message: MessageRequest):
+    """Send message to a specific session without streaming (fire-and-forget)"""
+    # Get project to check if active
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project["status"] != "active":
+        raise HTTPException(status_code=400, detail="Project is not active")
+    
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+    
+    # Verify session exists in project
+    sessions = project.get("sessions", [])
+    session_exists = any(s["session_id"] == message.session_id for s in sessions)
+    if not session_exists:
+        raise HTTPException(status_code=404, detail="Session not found in project")
+    
+    try:
+        # Forward to Goose API non-streaming endpoint
+        goose_url = f"http://{endpoint}/api/v1/sessions/{message.session_id}/send"
+        print(f"Sending message (fire-and-forget) to: {goose_url}")
+        
+        async with httpx.AsyncClient(timeout=120.0) as client:  # Longer timeout for non-streaming
+            response = await client.post(
+                goose_url,
+                json={"message": message.content},
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "message": "Message sent successfully",
+                    "result": result,
+                    "session_id": message.session_id
+                }
+            else:
+                error_data = response.json() if response.headers.get("content-type") == "application/json" else {"detail": response.text}
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=error_data.get("message") or error_data.get("detail") or f"Goose API returned {response.status_code}"
+                )
+    
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to Goose API: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
 
-@router.get("/users/{user_id}/projects/{project_id}/settings")
+@router.get("/users/{user_id}/projects/{project_id}/settings", operation_id="get_all_project_settings")
 async def get_project_settings(user_id: str, project_id: str):
     """Get all settings for a project"""
     project = mongodb_service.get_project(project_id)
@@ -599,7 +649,7 @@ async def get_project_settings(user_id: str, project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch settings: {str(e)}")
 
-@router.get("/users/{user_id}/projects/{project_id}/settings/{setting_key}")
+@router.get("/users/{user_id}/projects/{project_id}/settings/{setting_key}", operation_id="get_specific_project_setting")
 async def get_project_setting(user_id: str, project_id: str, setting_key: str):
     """Get a specific setting for a project"""
     project = mongodb_service.get_project(project_id)
@@ -637,7 +687,7 @@ async def get_project_setting(user_id: str, project_id: str, setting_key: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch setting: {str(e)}")
 
-@router.put("/users/{user_id}/projects/{project_id}/settings/{setting_key}")
+@router.put("/users/{user_id}/projects/{project_id}/settings/{setting_key}", operation_id="update_project_setting")
 async def update_project_setting(user_id: str, project_id: str, setting_key: str, setting_data: SettingUpdate):
     """Update a specific setting for a project"""
     project = mongodb_service.get_project(project_id)
@@ -689,7 +739,7 @@ async def update_project_setting(user_id: str, project_id: str, setting_key: str
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update setting: {str(e)}")
 
-@router.delete("/users/{user_id}/projects/{project_id}/settings/{setting_key}")
+@router.delete("/users/{user_id}/projects/{project_id}/settings/{setting_key}", operation_id="reset_project_settings")
 async def reset_project_setting(user_id: str, project_id: str, setting_key: str):
     """Reset a setting to its default value for a project"""
     project = mongodb_service.get_project(project_id)
@@ -737,7 +787,7 @@ async def reset_project_setting(user_id: str, project_id: str, setting_key: str)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reset setting: {str(e)}")
 
-@router.put("/users/{user_id}/projects/{project_id}/settings")
+@router.put("/users/{user_id}/projects/{project_id}/settings", operation_id="update_project_settings_in_bulk")
 async def update_project_settings_bulk(user_id: str, project_id: str, settings_data: dict):
     """Bulk update multiple settings for a project"""
     project = mongodb_service.get_project(project_id)
