@@ -36,6 +36,10 @@ class User(BaseModel):
 class ProjectUpdateGitHubKey(BaseModel):
     github_key: Optional[str] = None
 
+# New model for user-level GitHub token
+class UserGitHubKey(BaseModel):
+    github_key: Optional[str] = None
+
 class Extension(BaseModel):
     name: str
     display_name: Optional[str] = None

@@ -12,9 +12,9 @@ from fastapi_mcp import FastApiMCP
 from routes import project_routes
 
 app = FastAPI(
-    title="K8s Environment Manager", 
+    title="K8s Environment Manager",
     version="0.1.0",
-    description="A PoC application for managing Kubernetes-isolated user environments"
+    description="A PoC application for managing Kubernetes-isolated user environments",
 )
 
 # Add CORS middleware for development
@@ -30,13 +30,16 @@ templates = Jinja2Templates(directory="templates")
 
 app.include_router(project_routes.router)
 
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
 
 mcp = FastApiMCP(
     app,
@@ -55,20 +58,15 @@ mcp = FastApiMCP(
         "create_session",
         "get_all_project_sessions",
         "get_session_messages",
-        "send_message",
+        "send_message_fire_and_forget",
         "get_all_project_settings",
         "get_specific_project_setting",
-        "update_project_setting", 
+        "update_project_setting",
         "reset_project_settings",
-        "update_project_settings_in_bulk"
-    ]
+        "update_project_settings_in_bulk",
+    ],
 )
 mcp.mount_http()
 
 if __name__ == "__main__":
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
