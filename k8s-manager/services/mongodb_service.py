@@ -34,10 +34,10 @@ def get_project(project_id: str):
     except:
         return None
 
-def update_project(project_id: str, update_data: dict):
+def update_project(project_id: str, operation: dict):
     return get_projects_collection().update_one(
         {"_id": ObjectId(project_id)},
-        {"$set": update_data}
+        operation
     )
 
 def update_project_status(project_id: str, status: str, endpoint: str = None):

@@ -109,9 +109,10 @@ async def create_project(user_id: str, project: ProjectCreate):
         project_data["github_key_set"] = True
         project_data["github_key_source"] = "user"
         mongodb_service.update_project(project_id, {
+            "$set": {
             "github_key_set": True, 
             "github_key_source": "user"
-        })
+        }})
         # Get the global key from Kubernetes
         user_secret_exists = k8s_service.get_user_github_secret(user_id)
         if user_secret_exists:
@@ -159,7 +160,7 @@ async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
         "name": project.name,
         "updated_at": datetime.utcnow()
     }
-    result = mongodb_service.update_project(project_id, update_data)
+    result = mongodb_service.update_project(project_id, {"$set": update_data})
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"message": "Project updated successfully"}
@@ -268,16 +269,17 @@ async def update_project_github_key(user_id: str, project_id: str, github_key_da
         
         # Update the source to "project" since it's explicitly set for this project
         if github_key_data.github_key:
-            mongodb_service.update_project(project_id, {"github_key_source": "project"})
+            mongodb_service.update_project(project_id, {"$set": {"github_key_source": "project"}})
         else:
             # If removing project key, check if user has global key to fall back to
             if mongodb_service.has_user_github_key(user_id):
-                mongodb_service.update_project(project_id, {"github_key_source": "user", "github_key_set": True})
+                mongodb_service.update_project(project_id, {"$set":{"github_key_source": "user", "github_key_set": True}})
             else:
                 mongodb_service.update_project(project_id, {
-                    "$unset": {"github_key_source": ""},
-                    "github_key_set": False
+                    "$set": {"github_key_set": False},
+                    "$unset": {"github_key_source": ""}
                 })
+                
         
         action = "updated" if github_key_data.github_key else "removed"
         return {"message": f"GitHub key {action} successfully"}
@@ -334,10 +336,10 @@ async def update_user_github_key(user_id: str, github_key_data: UserGitHubKey):
                 project_id = str(project["_id"])
                 # Skip projects that have their own key
                 if project.get("github_key_source") != "project" and not project.get("github_key_masked"):
-                    mongodb_service.update_project(project_id, {
+                    mongodb_service.update_project(project_id, {"$set": {
                         "github_key_set": True,
                         "github_key_source": "user"
-                    })
+                    }})
             
             return {"message": "Global GitHub key set successfully"}
         else:
@@ -354,7 +356,7 @@ async def update_user_github_key(user_id: str, github_key_data: UserGitHubKey):
                 # Only update projects that were using the global key
                 if project.get("github_key_source") == "user":
                     mongodb_service.update_project(project_id, {
-                        "github_key_set": False,
+                        "$set": {"github_key_set": False},
                         "$unset": {"github_key_source": ""}
                     })
             
@@ -368,21 +370,7 @@ async def check_user_github_key(user_id: str):
     try:
         # Check MongoDB for user
         has_key = mongodb_service.has_user_github_key(user_id)
-        
-        # Verify with Kubernetes
-        secret_exists = k8s_service.get_user_github_secret(user_id)
-        
-        # Both should match, but Kubernetes is the source of truth
-        if has_key != secret_exists:
-            print(f"Warning: Mismatch between MongoDB and K8s for user {user_id} GitHub key")
-            # Sync them - if secret exists but MongoDB doesn't show it, update MongoDB
-            if secret_exists and not has_key:
-                mongodb_service.update_project(user_id, {"github_key_set": True})
-            # If MongoDB shows a key but K8s doesn't have it, update MongoDB
-            elif has_key and not secret_exists:
-                mongodb_service.delete_user_github_key(user_id)
-        
-        return {"github_key_set": secret_exists}
+        return {"github_key_set": has_key}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check global GitHub key: {str(e)}")
 
@@ -403,9 +391,10 @@ async def delete_user_github_key(user_id: str):
             # Only update projects that were using the global key
             if project.get("github_key_source") == "user":
                 mongodb_service.update_project(project_id, {
-                    "github_key_set": False,
+                    "$set": {"github_key_set": False},
                     "$unset": {"github_key_source": ""}
-                })
+                }
+                )
         
         return {"message": "Global GitHub key removed successfully"}
     except Exception as e:
