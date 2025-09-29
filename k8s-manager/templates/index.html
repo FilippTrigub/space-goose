@@ -239,13 +239,15 @@
         .status-badge {
             display: inline-flex;
             align-items: center;
-            gap: 0.25rem;
-            padding: 0.25rem 0.75rem;
+            gap: 0.05rem;
+            padding: 0.05rem 0.05rem;
+            margin: 0;
             border-radius: 9999px;
             font-size: 0.75rem;
             font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.025em;
+            min-width: 40%;
         }
 
         .status-active {
@@ -282,6 +284,50 @@
 
         .project-meta div:last-child {
             margin-bottom: 0;
+        }
+        
+        /* Agent Status in Project Card */
+        .agent-status {
+            margin: 0;
+            padding: 0.05rem;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius);
+            font-size: 0.75rem;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            border: 1px solid var(--border);
+        }
+        
+        .agent-status-text {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        .agent-status-idle {
+            color: var(--success);
+        }
+        
+        .agent-status-processing {
+            color: var(--warning);
+        }
+        
+        .agent-status-error {
+            color: var(--danger);
+        }
+        
+        .agent-status-inactive {
+            color: var(--text-muted);
+        }
+        
+        .agent-status-refresh {
+            padding: 0;
+            margin: 0;
+            font-size: 0.5rem;
+            min-width: auto;
         }
 
         .project-sessions {
@@ -1140,6 +1186,7 @@
         let projectSettings = [];
         let settingsChanges = {}; // Track pending changes
         let userGitHubKeySet = false; // Track global GitHub key status
+        let agentStatusTimers = {}; // Track status timers per project
 
         document.addEventListener('DOMContentLoaded', async () => {
             await initializeApp();
@@ -1820,9 +1867,13 @@
                                 <h3>${escapeHtml(project.name)}</h3>
                                 <div class="project-id">ID: ${project.id.slice(0, 8)}...</div>
                             </div>
-                            <div class="status-badge ${isActive ? 'status-active' : 'status-inactive'}">
-                                <div class="status-dot"></div>
-                                ${isActive ? 'Active' : 'Inactive'}
+                            <div class="status-badge" id="agent-status-${project.id}">
+                                <button class="btn btn-outline agent-status-refresh" onclick="refreshProjectAgentStatus('${project.id}')">
+                                    🔄
+                                </button>
+                                <div class="agent-status-text">
+                                    <span id="agent-status-text-${project.id}">🔄 Checking agent status...</span>
+                                </div>
                             </div>
                         </div>
                         
@@ -1863,6 +1914,11 @@
             }).join('');
 
             grid.innerHTML = createCard + projectCards;
+            
+            // Load agent status for all projects after rendering
+            projectList.forEach(project => {
+                loadProjectAgentStatus(project.id);
+            });
         }
 
         function setupModalHandlers() {
@@ -2671,6 +2727,7 @@
                 messageOutput.textContent += `\n🤖 Assistant: `;
                 let assistantContent = '';
                 let lastEventType = null;
+                loadProjectAgentStatus(activeProject);
 
                 // Read the streaming response
                 const reader = response.body.getReader();
@@ -2811,6 +2868,9 @@
                 sendMessageBtn.disabled = false;
                 messageInput.disabled = false;
                 spinner.style.display = 'none';
+                
+                // Stop monitoring agent status after response completes
+                loadProjectAgentStatus(activeProject);
             }
         }
 
@@ -2910,6 +2970,73 @@
             div.textContent = text;
             return div.innerHTML;
         }
+        
+        async function loadProjectAgentStatus(projectId) {
+            if (!currentUser || !projectId) return;
+            
+            const statusElement = document.getElementById(`agent-status-text-${projectId}`);
+            if (!statusElement) return;
+            
+            try {
+                console.log("fetching agent status");
+                const response = await fetch(`/users/${currentUser}/projects/${projectId}/agent/status`);
+                console.log("fetched")
+                if (response.ok) {
+                    const status = await response.json();
+                    console.log(`fetched agent status ${status.project_status}`);
+                    updateProjectAgentStatusDisplay(projectId, status);
+                } else {
+                    statusElement.innerHTML = '❌ API Error';
+                    statusElement.className = 'agent-status-text agent-status-error';
+                }
+            } catch (error) {
+                statusElement.innerHTML = '❌ Unavailable';
+                statusElement.className = 'agent-status-text agent-status-error';
+            }
+        }
+        
+        function updateProjectAgentStatusDisplay(projectId, status) {
+            const statusElement = document.getElementById(`agent-status-text-${projectId}`);
+            if (!statusElement) return;
+            
+            let statusText = '';
+            let statusClass = 'agent-status-text ';
+            
+            if (status.project_status === 'inactive') {
+                statusText = '⚫ Inactive';
+                statusClass += 'agent-status-inactive';
+            } else if (status.error) {
+                statusText = '❌ Error';
+                statusClass += 'agent-status-error';
+            } else if (status.overall_status === 'processing') {
+                statusText = `⏳ Processing (${status.active_sessions})`;
+                statusClass += 'agent-status-processing';
+            } else if (status.overall_status === 'idle') {
+                statusText = `✅ Idle`;
+                if (status.total_processed > 0) {
+                    statusText += ` (${status.total_processed})`;
+                }
+                statusClass += 'agent-status-idle';
+            } else {
+                statusText = `🟡 ${status.overall_status}`;
+                statusClass += 'agent-status-inactive';
+            }
+            
+            // Add uptime if available and agent is active
+            if (status.uptime_seconds > 0 && status.project_status === 'active') {
+                const uptimeMinutes = Math.floor(status.uptime_seconds / 60);
+                if (uptimeMinutes > 0) {
+                    statusText += ` | ${uptimeMinutes}m uptime`;
+                }
+            }
+            
+            statusElement.innerHTML = statusText;
+            statusElement.className = statusClass;
+        }
+        
+        async function refreshProjectAgentStatus(projectId) {
+            await loadProjectAgentStatus(projectId);
+        }
 
         // Global functions for onclick handlers
         window.openCreateModal = openCreateModal;
@@ -2926,6 +3053,7 @@
         window.updateSettingValue = updateSettingValue;
         window.resetSetting = resetSetting;
         window.closeAlert = closeAlert;
+        window.refreshProjectAgentStatus = refreshProjectAgentStatus;
     </script>
 </body>
 
