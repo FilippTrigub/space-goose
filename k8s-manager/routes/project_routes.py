@@ -657,7 +657,7 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
                 ) as response:
                     if response.status_code != 200:
                         error_text = await response.aread()
-                        yield f"data: {{\\\"error\\\": \\\"Goose API returned {response.status_code}: {error_text.decode()}\\\"}}\\n\\n"
+                        yield f"data: {{\"error\": \"Goose API returned {response.status_code}: {error_text.decode()}\"}}\n\n"
                         return
                     
                     # Stream the Server-Sent Events
@@ -672,16 +672,16 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
                                     if json_str.strip():  # Skip empty data lines
                                         # Parse and re-emit the JSON
                                         parsed_data = json.loads(json_str)
-                                        yield f"data: {json.dumps(parsed_data)}\\n\\n"
+                                        yield f"data: {json.dumps(parsed_data)}\n\n"
                                 except json.JSONDecodeError:
                                     # If not valid JSON, pass through as-is
-                                    yield f"data: {{\\\"raw\\\": {json.dumps(json_str)}}}\\n\\n"
+                                    yield f"data: {{\"raw\": {json.dumps(json_str)}}}\n\n"
                             elif line == '':
                                 # Empty line - keep for SSE format
                                 yield '\n'
                             else:
                                 # Other SSE lines (like event:, id:, etc.)
-                                yield f"{line}\\n"
+                                yield f"{line}\n"
         
         return StreamingResponse(
             stream_response(),
