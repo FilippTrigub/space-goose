@@ -174,7 +174,11 @@
             font-size: 1rem;
         }
 
-
+        .content-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
 
         /* Projects Grid */
         .projects-grid {
@@ -639,7 +643,7 @@
             margin-bottom: 0.5rem;
         }
 
-        .form-group input {
+        .form-group input, .form-group select {
             width: 100%;
             padding: 0.75rem;
             border: 1px solid var(--border);
@@ -648,7 +652,7 @@
             transition: all 0.2s;
         }
 
-        .form-group input:focus {
+        .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
@@ -659,6 +663,23 @@
             color: var(--text-muted);
             margin-top: 0.25rem;
             display: block;
+        }
+
+        .form-status {
+            font-size: 0.875rem;
+            padding: 0.75rem;
+            border-radius: var(--radius);
+            margin-top: 0.5rem;
+        }
+
+        .form-status.success {
+            background: rgba(5, 150, 105, 0.1);
+            color: var(--success);
+        }
+
+        .form-status.warning {
+            background: rgba(217, 119, 6, 0.1);
+            color: var(--warning);
         }
 
         .modal-footer {
@@ -773,6 +794,15 @@
             font-size: 0.875rem;
         }
 
+        /* GitHub Token Source indicators */
+        .github-source-global {
+            color: var(--primary) !important;
+        }
+
+        .github-source-project {
+            color: var(--success) !important;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .nav-content {
@@ -787,6 +817,10 @@
             .content-header-row {
                 flex-direction: column;
                 gap: 1rem;
+            }
+
+            .content-actions {
+                justify-content: flex-start;
             }
 
             .alert-overlay {
@@ -830,6 +864,9 @@
                             <option value="">Loading users...</option>
                         </select>
                     </div>
+                    <button id="user-settings-btn" class="btn btn-outline btn-xs" disabled>
+                        ⚙️ User Settings
+                    </button>
                 </div>
             </div>
         </nav>
@@ -845,7 +882,11 @@
                         </h2>
                         <p class="content-subtitle">Manage your Kubernetes environments and chat with AI assistants</p>
                     </div>
-
+                    <div class="content-actions">
+                        <div id="github-status-indicator" style="display: none; font-size: 0.875rem; color: rgba(255, 255, 255, 0.8);">
+                            <!-- GitHub status will be shown here -->
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -886,6 +927,36 @@
         <!-- Alert Overlay Container -->
         <div class="alert-overlay" id="alert-overlay"></div>
 
+        <!-- User Settings Modal -->
+        <div class="modal-overlay" id="user-settings-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>⚙️ User Settings</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="global-github-key-input">Global GitHub Token</label>
+                        <input type="password" id="global-github-key-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                        <small class="form-help">
+                            Set a default GitHub token that will be used for all new projects. 
+                            Individual projects can override this setting.
+                        </small>
+                        <div id="global-github-status" class="form-status" style="display: none;">
+                            <!-- Status will be shown here -->
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" id="remove-global-github-btn" style="display: none;">Remove Global Token</button>
+                    <button class="btn btn-outline" id="cancel-user-settings-btn">Cancel</button>
+                    <button class="btn btn-primary" id="save-user-settings-btn">
+                        <span class="spinner" style="display: none;"></span>
+                        Save Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Create Project Modal -->
         <div class="modal-overlay" id="create-modal">
             <div class="modal">
@@ -898,9 +969,18 @@
                         <input type="text" id="project-name-input" placeholder="Enter a descriptive project name...">
                     </div>
                     <div class="form-group">
-                        <label for="github-key-input">GitHub Token</label>
-                        <input type="password" id="github-key-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
-                        <small class="form-help">GitHub personal access token for private repositories</small>
+                        <label for="github-token-source">GitHub Token</label>
+                        <select id="github-token-source">
+                            <option value="global">Use Global Token (if available)</option>
+                            <option value="project">Set Project-Specific Token</option>
+                            <option value="none">No GitHub Token</option>
+                        </select>
+                        <div id="project-github-key-group" style="display: none; margin-top: 0.75rem;">
+                            <input type="password" id="github-key-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                        </div>
+                        <div id="github-token-status" class="form-status" style="display: none;">
+                            <!-- Token status will be shown here -->
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1059,6 +1139,7 @@
         let projectExtensions = [];
         let projectSettings = [];
         let settingsChanges = {}; // Track pending changes
+        let userGitHubKeySet = false; // Track global GitHub key status
 
         document.addEventListener('DOMContentLoaded', async () => {
             await initializeApp();
@@ -1088,6 +1169,144 @@
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) closeSettingsModal();
             });
+        }
+
+        function setupUserSettingsModalHandlers() {
+            const modal = document.getElementById('user-settings-modal');
+            const cancelBtn = document.getElementById('cancel-user-settings-btn');
+            const saveBtn = document.getElementById('save-user-settings-btn');
+            const removeBtn = document.getElementById('remove-global-github-btn');
+            const githubKeyInput = document.getElementById('global-github-key-input');
+            const userSettingsBtn = document.getElementById('user-settings-btn');
+
+            userSettingsBtn.addEventListener('click', () => {
+                openUserSettingsModal();
+            });
+
+            cancelBtn.addEventListener('click', () => {
+                closeUserSettingsModal();
+            });
+
+            saveBtn.addEventListener('click', async () => {
+                const githubKey = githubKeyInput.value.trim();
+                await updateUserGitHubKey(githubKey);
+            });
+
+            removeBtn.addEventListener('click', async () => {
+                if (confirm('Are you sure you want to remove your global GitHub token?')) {
+                    await updateUserGitHubKey('');
+                }
+            });
+
+            githubKeyInput.addEventListener('keypress', async (e) => {
+                if (e.key === 'Enter') {
+                    const githubKey = githubKeyInput.value.trim();
+                    await updateUserGitHubKey(githubKey);
+                }
+            });
+
+            // Close modal on overlay click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeUserSettingsModal();
+            });
+        }
+
+        function openUserSettingsModal() {
+            if (!currentUser) {
+                showAlert('Please select a user first', 'error');
+                return;
+            }
+
+            const modal = document.getElementById('user-settings-modal');
+            const input = document.getElementById('global-github-key-input');
+            const status = document.getElementById('global-github-status');
+            const removeBtn = document.getElementById('remove-global-github-btn');
+
+            input.value = '';
+            
+            if (userGitHubKeySet) {
+                status.innerHTML = '✅ You have a global GitHub token configured';
+                status.className = 'form-status success';
+                status.style.display = 'block';
+                removeBtn.style.display = 'inline-flex';
+            } else {
+                status.innerHTML = '⚠️ No global GitHub token configured - projects will need individual tokens';
+                status.className = 'form-status warning';
+                status.style.display = 'block';
+                removeBtn.style.display = 'none';
+            }
+
+            modal.classList.add('active');
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeUserSettingsModal() {
+            const modal = document.getElementById('user-settings-modal');
+            modal.classList.remove('active');
+        }
+
+        async function updateUserGitHubKey(githubKey) {
+            const saveBtn = document.getElementById('save-user-settings-btn');
+            const spinner = saveBtn.querySelector('.spinner');
+
+            try {
+                saveBtn.disabled = true;
+                spinner.style.display = 'inline-block';
+
+                const requestBody = { github_key: githubKey };
+
+                const response = await fetch(`/users/${currentUser}/github-key`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showAlert(result.message, 'success');
+                    closeUserSettingsModal();
+                    
+                    // Update global status
+                    await loadUserGitHubKeyStatus();
+                    await loadProjects(currentUser);
+                    updateGitHubStatusIndicator();
+                } else {
+                    const error = await response.json();
+                    showAlert(error.detail || 'Failed to update global GitHub key', 'error');
+                }
+            } catch (error) {
+                showAlert('Failed to update global GitHub key', 'error');
+            } finally {
+                saveBtn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+
+        async function loadUserGitHubKeyStatus() {
+            if (!currentUser) return;
+
+            try {
+                const response = await fetch(`/users/${currentUser}/github-key`);
+                if (response.ok) {
+                    const data = await response.json();
+                    userGitHubKeySet = data.github_key_set;
+                } else {
+                    userGitHubKeySet = false;
+                }
+            } catch (error) {
+                userGitHubKeySet = false;
+            }
+        }
+
+        function updateGitHubStatusIndicator() {
+            const indicator = document.getElementById('github-status-indicator');
+            
+            if (currentUser && userGitHubKeySet) {
+                indicator.innerHTML = '🌐 Global GitHub Token Active';
+                indicator.style.display = 'block';
+            } else {
+                indicator.style.display = 'none';
+            }
         }
 
         // Settings Management Functions
@@ -1371,6 +1590,12 @@
                     currentUser = userId;
                     const userName = userSelect.options[userSelect.selectedIndex].text;
                     document.getElementById('current-user-name').textContent = userName;
+                    document.getElementById('user-settings-btn').disabled = false;
+                    
+                    // Load user GitHub key status
+                    await loadUserGitHubKeyStatus();
+                    updateGitHubStatusIndicator();
+                    
                     // Clear active project and session when user changes
                     activeProject = null;
                     currentSession = null;
@@ -1379,6 +1604,9 @@
                 } else {
                     currentUser = null;
                     document.getElementById('current-user-name').textContent = 'Select a user to continue';
+                    document.getElementById('user-settings-btn').disabled = true;
+                    userGitHubKeySet = false;
+                    updateGitHubStatusIndicator();
                     // Clear active project and session
                     activeProject = null;
                     currentSession = null;
@@ -1411,6 +1639,7 @@
             setupGitHubKeyModalHandlers();
             setupExtensionsModalHandlers();
             setupSettingsModalHandlers();
+            setupUserSettingsModalHandlers();
         }
 
         function setupGitHubKeyModalHandlers() {
@@ -1494,6 +1723,23 @@
             }
         }
 
+        function getGitHubTokenStatus(project) {
+            if (!project.github_key_set) {
+                return { text: '🚫 No GitHub Token', class: '' };
+            }
+            
+            // Check if project has github_key_source property
+            const source = project.github_key_source;
+            if (source === 'user') {
+                return { text: '🌐 Global Token', class: 'github-source-global' };
+            } else if (source === 'project') {
+                return { text: '🔑 Project Token', class: 'github-source-project' };
+            } else {
+                // Fallback for existing projects without source info
+                return { text: '🔑 GitHub Token Set', class: '' };
+            }
+        }
+
         function renderProjects(projectList) {
             const grid = document.getElementById('projects-grid');
 
@@ -1532,7 +1778,7 @@
                 const isActive = project.status === 'active';
                 const createdDate = project.created_at ? new Date(project.created_at).toLocaleDateString() : 'Unknown';
                 const sessions = project.sessions || [];
-                const githubKeyStatus = project.github_key_set ? '🔑 GitHub Token Set' : '🚫 No GitHub Token';
+                const githubStatus = getGitHubTokenStatus(project);
 
                 // Determine session action button
                 let sessionButton = '';
@@ -1583,7 +1829,7 @@
                         <div class="project-meta">
                             <div><span>Created:</span> <span>${createdDate}</span></div>
                             <div><span>Status:</span> <span>${isActive ? '🟢 Running' : '🔴 Stopped'}</span></div>
-                            <div><span>GitHub:</span> <span>${githubKeyStatus}</span></div>
+                            <div><span>GitHub:</span> <span class="${githubStatus.class}">${githubStatus.text}</span></div>
                             ${project.endpoint ? `<div><span>Endpoint:</span> <span>${project.endpoint}</span></div>` : ''}
                         </div>
                         
@@ -1625,6 +1871,14 @@
             const cancelBtn = document.getElementById('cancel-create-btn');
             const confirmBtn = document.getElementById('confirm-create-btn');
             const projectNameInput = document.getElementById('project-name-input');
+            const githubTokenSource = document.getElementById('github-token-source');
+            const projectGithubKeyGroup = document.getElementById('project-github-key-group');
+            const githubTokenStatus = document.getElementById('github-token-status');
+
+            // Handle token source change
+            githubTokenSource.addEventListener('change', () => {
+                updateGitHubTokenSourceDisplay();
+            });
 
             cancelBtn.addEventListener('click', () => {
                 closeCreateModal();
@@ -1632,11 +1886,7 @@
 
             confirmBtn.addEventListener('click', async () => {
                 const name = projectNameInput.value.trim();
-                const githubKey = document.getElementById('github-key-input').value.trim();
-                if (!githubKey) {
-                    showAlert('Please enter a github PAT', 'error');
-                    return;
-                }
+                
                 if (!name) {
                     showAlert('Please enter a project name', 'error');
                     return;
@@ -1645,14 +1895,10 @@
                 await createProject(name);
             });
 
-            // Handle Enter key in both inputs
+            // Handle Enter key in inputs
             projectNameInput.addEventListener('keypress', async (e) => {
                 if (e.key === 'Enter') {
                     const name = projectNameInput.value.trim();
-                    if (!githubKey) {
-                        showAlert('Please enter a github PAT', 'error');
-                        return;
-                    }
                     if (!name) {
                         showAlert('Please enter a project name', 'error');
                         return;
@@ -1664,15 +1910,11 @@
             document.getElementById('github-key-input').addEventListener('keypress', async (e) => {
                 if (e.key === 'Enter') {
                     const name = projectNameInput.value.trim();
-                if (!githubKey) {
-                    showAlert('Please enter a github PAT', 'error');
-                    return;
-                }
-                if (!name) {
-                    showAlert('Please enter a project name', 'error');
-                    return;
-                }
-                await createProject(name);
+                    if (!name) {
+                        showAlert('Please enter a project name', 'error');
+                        return;
+                    }
+                    await createProject(name);
                 }
             });
 
@@ -1708,6 +1950,34 @@
             });
         }
 
+        function updateGitHubTokenSourceDisplay() {
+            const tokenSource = document.getElementById('github-token-source').value;
+            const projectKeyGroup = document.getElementById('project-github-key-group');
+            const tokenStatus = document.getElementById('github-token-status');
+
+            if (tokenSource === 'project') {
+                projectKeyGroup.style.display = 'block';
+                tokenStatus.innerHTML = '🔑 You will set a project-specific GitHub token';
+                tokenStatus.className = 'form-status success';
+                tokenStatus.style.display = 'block';
+            } else if (tokenSource === 'global') {
+                projectKeyGroup.style.display = 'none';
+                if (userGitHubKeySet) {
+                    tokenStatus.innerHTML = '🌐 Project will use your global GitHub token';
+                    tokenStatus.className = 'form-status success';
+                } else {
+                    tokenStatus.innerHTML = '⚠️ No global token set - configure one in User Settings first';
+                    tokenStatus.className = 'form-status warning';
+                }
+                tokenStatus.style.display = 'block';
+            } else { // none
+                projectKeyGroup.style.display = 'none';
+                tokenStatus.innerHTML = '🚫 Project will have no GitHub token access';
+                tokenStatus.className = 'form-status warning';
+                tokenStatus.style.display = 'block';
+            }
+        }
+
         function openCreateModal() {
             if (!currentUser) {
                 showAlert('Please select a user first', 'error');
@@ -1717,9 +1987,19 @@
             const modal = document.getElementById('create-modal');
             const input = document.getElementById('project-name-input');
             const githubInput = document.getElementById('github-key-input');
+            const tokenSource = document.getElementById('github-token-source');
 
             input.value = '';
             githubInput.value = '';
+            
+            // Set default token source based on whether user has global token
+            if (userGitHubKeySet) {
+                tokenSource.value = 'global';
+            } else {
+                tokenSource.value = 'project';
+            }
+            
+            updateGitHubTokenSourceDisplay();
             modal.classList.add('active');
             setTimeout(() => input.focus(), 100);
         }
@@ -1758,11 +2038,15 @@
 
             // Set modal title and status
             title.textContent = hasKey ? 'Update GitHub Key' : 'Add GitHub Key';
+            
+            const project = projects.find(p => p.id === projectId);
+            const githubStatus = getGitHubTokenStatus(project || {});
+            
             if (hasKey) {
-                status.innerHTML = '\uD83D\uDD11 <strong>Current Status:</strong> GitHub token is set for this project';
+                status.innerHTML = `🔑 <strong>Current Status:</strong> ${githubStatus.text}`;
                 removeBtn.style.display = 'inline-flex';
             } else {
-                status.innerHTML = '\uD83D\uDEAB <strong>Current Status:</strong> No GitHub token set for this project';
+                status.innerHTML = '🚫 <strong>Current Status:</strong> No GitHub token set for this project';
                 removeBtn.style.display = 'none';
             }
 
@@ -2094,16 +2378,24 @@
         async function createProject(name) {
             const confirmBtn = document.getElementById('confirm-create-btn');
             const spinner = confirmBtn.querySelector('.spinner');
-            const githubKey = document.getElementById('github-key-input').value.trim();
+            const tokenSource = document.getElementById('github-token-source').value;
 
             try {
                 confirmBtn.disabled = true;
                 spinner.style.display = 'inline-block';
 
                 const requestBody = { name };
-                if (githubKey) {
+                
+                // Only include GitHub key if using project-specific token
+                if (tokenSource === 'project') {
+                    const githubKey = document.getElementById('github-key-input').value.trim();
+                    if (!githubKey) {
+                        showAlert('Please enter a GitHub token or choose a different option', 'error');
+                        return;
+                    }
                     requestBody.github_key = githubKey;
                 }
+                // For 'global' and 'none', don't include github_key in request
 
                 const response = await fetch(`/users/${currentUser}/projects`, {
                     method: 'POST',

@@ -8,12 +8,16 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB = os.getenv("MONGO_DB")
 PROJECTS_COLLECTION = "projects"
+USERS_COLLECTION = "users"  # New collection for user data
 
 client = MongoClient(MONGO_URI)
 db = client[MONGO_DB]
 
 def get_projects_collection():
     return db[PROJECTS_COLLECTION]
+
+def get_users_collection():
+    return db[USERS_COLLECTION]
 
 def list_projects(user_id: str):
     return list(get_projects_collection().find({"user_id": user_id}))
@@ -30,10 +34,10 @@ def get_project(project_id: str):
     except:
         return None
 
-def update_project(project_id: str, update_data: dict):
+def update_project(project_id: str, operation: dict):
     return get_projects_collection().update_one(
         {"_id": ObjectId(project_id)},
-        {"$set": update_data}
+        operation
     )
 
 def update_project_status(project_id: str, status: str, endpoint: str = None):
@@ -124,3 +128,63 @@ def update_github_key(project_id: str, github_key: str = None):
 
 def delete_project(project_id: str):
     return get_projects_collection().delete_one({"_id": ObjectId(project_id)})
+
+# New user GitHub token functions
+
+def get_user(user_id: str):
+    """Get user document from MongoDB"""
+    return get_users_collection().find_one({"user_id": user_id})
+
+def ensure_user_exists(user_id: str, user_name: str = None):
+    """Ensure user exists in the users collection"""
+    existing_user = get_user(user_id)
+    
+    if not existing_user:
+        # Create user document if it doesn't exist
+        user_data = {
+            "user_id": user_id,
+            "name": user_name or f"User {user_id}",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        get_users_collection().insert_one(user_data)
+        return True
+    
+    return False
+
+def store_user_github_key(user_id: str, github_key: str):
+    """Store GitHub key for a user (masked for security)"""
+    # Ensure user exists
+    ensure_user_exists(user_id)
+    
+    # Store masked version for reference (same masking as project keys)
+    masked_key = f"{github_key[:8]}{'*' * (len(github_key) - 12)}{github_key[-4:]}" if len(github_key) > 12 else "*" * len(github_key)
+    
+    return get_users_collection().update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "github_key_masked": masked_key,
+                "github_key_set": True,
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+
+def delete_user_github_key(user_id: str):
+    """Remove GitHub key from a user"""
+    return get_users_collection().update_one(
+        {"user_id": user_id},
+        {
+            "$unset": {"github_key_masked": ""},
+            "$set": {
+                "github_key_set": False,
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+
+def has_user_github_key(user_id: str):
+    """Check if a user has a GitHub key set"""
+    user = get_user(user_id)
+    return user and user.get("github_key_set", False)

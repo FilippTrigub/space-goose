@@ -570,6 +570,112 @@ def update_github_secret(user_id: str, project_id: str, github_key: str = None):
     except Exception as e:
         print(f"⚠ Warning: Unexpected error restarting deployment: {e}")
 
+# New function to create or update user-level GitHub secret
+def create_or_update_user_github_secret(user_id: str, github_key: str):
+    """
+    Create or update a user-level GitHub secret for all projects.
+    """
+    namespace = f"user-{user_id}"
+    github_secret_name = f"user-{user_id}-github-key"
+    
+    # Ensure namespace exists
+    ensure_namespace(user_id)
+    
+    # Create or update the secret
+    try:
+        # Check if secret already exists
+        try:
+            existing_secret = core_v1.read_namespaced_secret(name=github_secret_name, namespace=namespace)
+            print(f"ℹ Updating existing user GitHub Secret {github_secret_name}")
+            
+            # Update secret data
+            secret_data = {
+                "GITHUB_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
+            }
+            existing_secret.data = secret_data
+            
+            core_v1.replace_namespaced_secret(
+                name=github_secret_name,
+                namespace=namespace,
+                body=existing_secret
+            )
+            print(f"✓ Updated user GitHub Secret {github_secret_name} in namespace {namespace}")
+            
+        except ApiException as e:
+            if e.status == 404:
+                # Secret doesn't exist, create it
+                secret_data = {
+                    "GITHUB_TOKEN": base64.b64encode(github_key.encode('utf-8')).decode('utf-8')
+                }
+                secret_body = client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=github_secret_name,
+                        labels={
+                            "managed-by": "k8s-manager",
+                            "user-id": user_id,
+                            "type": "user-github-key"
+                        }
+                    ),
+                    type="Opaque",
+                    data=secret_data
+                )
+                core_v1.create_namespaced_secret(namespace=namespace, body=secret_body)
+                print(f"✓ Created user GitHub Secret {github_secret_name} in namespace {namespace}")
+            else:
+                print(f"✗ Failed to update user GitHub Secret: {e}")
+                raise e
+    except Exception as e:
+        print(f"✗ Unexpected error with user GitHub Secret: {e}")
+        raise e
+    
+    return github_secret_name
+
+def delete_user_github_secret(user_id: str):
+    """
+    Delete the user-level GitHub secret.
+    """
+    namespace = f"user-{user_id}"
+    github_secret_name = f"user-{user_id}-github-key"
+    
+    try:
+        core_v1.delete_namespaced_secret(
+            name=github_secret_name,
+            namespace=namespace,
+            body=client.V1DeleteOptions(grace_period_seconds=10)
+        )
+        print(f"✓ Deleted user GitHub Secret {github_secret_name} from namespace {namespace}")
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            print(f"ℹ User GitHub Secret {github_secret_name} was already deleted or doesn't exist")
+            return False
+        else:
+            print(f"✗ Failed to delete user GitHub Secret: {e}")
+            raise e
+    except Exception as e:
+        print(f"✗ Unexpected error deleting user GitHub Secret: {e}")
+        raise e
+
+def get_user_github_secret(user_id: str):
+    """
+    Check if a user-level GitHub secret exists.
+    """
+    namespace = f"user-{user_id}"
+    github_secret_name = f"user-{user_id}-github-key"
+    
+    try:
+        secret = core_v1.read_namespaced_secret(name=github_secret_name, namespace=namespace)
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            return False
+        else:
+            print(f"✗ Failed to check user GitHub Secret: {e}")
+            raise e
+    except Exception as e:
+        print(f"✗ Unexpected error checking user GitHub Secret: {e}")
+        raise e
+
 def update_deployment_env_vars(user_id: str, project_id: str, env_vars: dict):
     """
     Update environment variables for a deployment and restart it.
