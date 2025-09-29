@@ -142,7 +142,7 @@ async def create_project(user_id: str, project: ProjectCreate):
         k8s_service.apply_project_resources(user_id, project_id, github_key)
 
         # Wait for pod to be ready - simple approach for POC
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
         # Get LoadBalancer IP/hostname
         try:
@@ -1370,4 +1370,65 @@ async def update_project_settings_bulk(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to update settings: {str(e)}"
+        )
+
+
+@router.get(
+    "/users/{user_id}/projects/{project_id}/agent/status",
+    operation_id="get_agent_status",
+)
+async def get_agent_status(user_id: str, project_id: str):
+    """Get the current status of the AI agent for a project"""
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+
+    if project["status"] != "active":
+        return {
+            "overall_status": "inactive",
+            "active_sessions": 0,
+            "total_processed": 0,
+            "uptime_seconds": 0,
+            "sessions": [],
+            "project_status": "inactive",
+        }
+
+    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+    if not endpoint:
+        raise HTTPException(status_code=500, detail="Project endpoint not available")
+
+    try:
+        goose_url = f"http://{endpoint}/api/v1/agent/status"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(goose_url)
+
+            if response.status_code == 200:
+                result = response.json()
+                # Add project status for context
+                result["project_status"] = "active"
+                return result
+            else:
+                error_text = response.text
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Goose API returned {response.status_code}: {error_text}",
+                )
+
+    except httpx.RequestError as e:
+        # If we can't connect, assume agent is down
+        return {
+            "overall_status": "error",
+            "active_sessions": 0,
+            "total_processed": 0,
+            "uptime_seconds": 0,
+            "sessions": [],
+            "project_status": "active",
+            "error": f"Failed to connect to agent: {str(e)}",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get agent status: {str(e)}"
         )
