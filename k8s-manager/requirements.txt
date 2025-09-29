@@ -1,4 +1,5 @@
 fastapi
+fastapi-mcp
 uvicorn
 python-multipart
 jinja2
