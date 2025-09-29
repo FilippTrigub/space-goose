@@ -16,10 +16,43 @@ users = [{"id": "user1", "name": "User 1"}, {"id": "user2", "name": "User 2"}]
 
 @router.get("/users", response_model=List[User])
 async def get_users():
+    """
+    Get a list of all available users.
+    
+    Returns:
+        List[User]: A list of User objects containing user IDs and names
+        
+    Example:
+        Returns static user list for MVP version
+    """
     return [User(**user) for user in users]
 
 @router.get("/users/{user_id}/projects", operation_id="get_user_projects")
 async def get_projects(user_id: str):
+    """
+    Get all projects for a specific user.
+    
+    Args:
+        user_id (str): The ID of the user to fetch projects for
+    
+    Returns:
+        List[dict]: A list of project dictionaries containing project details
+            - id: Project identifier
+            - user_id: Owner of the project
+            - name: Project name
+            - status: Current status (active/inactive)
+            - endpoint: URL endpoint when active
+            - github_key_set: Whether GitHub key is configured
+            - sessions: List of associated sessions
+            - created_at: Creation timestamp
+            - updated_at: Last update timestamp
+    
+    Raises:
+        HTTPException: Not explicitly raised but could be from the database service
+        
+    Example:
+        Retrieves all projects from MongoDB for the specified user
+    """
     projects = mongodb_service.list_projects(user_id)
     return [{
         "id": str(project["_id"]),
@@ -35,6 +68,28 @@ async def get_projects(user_id: str):
 
 @router.post("/users/{user_id}/projects", operation_id="create_project")
 async def create_project(user_id: str, project: ProjectCreate):
+    """
+    Create a new project with Kubernetes resources.
+    
+    Args:
+        user_id (str): The ID of the user who owns the project
+        project (ProjectCreate): Project creation data containing:
+            - name: Name for the new project
+            - github_key (optional): GitHub API key for repository access
+    
+    Returns:
+        dict: Response containing project creation confirmation
+            - message: Success message
+            - project_id: ID of the newly created project
+    
+    Raises:
+        HTTPException: When Kubernetes resource creation fails
+            - 500: Failed to create K8s resources with error details
+    
+    Example:
+        Creates a project record in MongoDB and corresponding K8s resources
+        If GitHub key is provided, it's stored securely for the project
+    """
     project_data = {
         "user_id": user_id,
         "name": project.name,
@@ -80,6 +135,26 @@ async def create_project(user_id: str, project: ProjectCreate):
 
 @router.put("/users/{user_id}/projects/{project_id}", operation_id="update_project")
 async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
+    """
+    Update an existing project's name and metadata.
+    
+    Args:
+        user_id (str): The ID of the user who owns the project
+        project_id (str): The ID of the project to update
+        project (ProjectUpdate): Project update data containing:
+            - name: New name for the project
+    
+    Returns:
+        dict: Response containing update confirmation
+            - message: Success message
+    
+    Raises:
+        HTTPException: When project is not found
+            - 404: Project not found if no matching project exists
+    
+    Example:
+        Updates project name and updates the last modified timestamp
+    """
     update_data = {
         "name": project.name,
         "updated_at": datetime.utcnow()
@@ -91,6 +166,25 @@ async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
 
 @router.delete("/users/{user_id}/projects/{project_id}", operation_id="delete_project")
 async def delete_project(user_id: str, project_id: str):
+    """
+    Delete a project and all its associated Kubernetes resources.
+    
+    Args:
+        user_id (str): The ID of the user who owns the project
+        project_id (str): The ID of the project to delete
+    
+    Returns:
+        dict: Response containing deletion confirmation
+            - message: Success message
+    
+    Raises:
+        HTTPException: When project is not found
+            - 404: Project not found if no matching project exists
+    
+    Example:
+        First deactivates the project if active, removes all K8s resources,
+        then deletes the project record from MongoDB
+    """
     # First deactivate if active
     project = mongodb_service.get_project(project_id)
     if project and project["status"] == "active":
@@ -108,6 +202,27 @@ async def delete_project(user_id: str, project_id: str):
 
 @router.post("/users/{user_id}/projects/{project_id}/activate", operation_id="activate_project")
 async def activate_project(user_id: str, project_id: str):
+    """
+    Activate a project by scaling up its deployment and retrieving the endpoint.
+    
+    Args:
+        user_id (str): The ID of the user who owns the project
+        project_id (str): The ID of the project to activate
+    
+    Returns:
+        dict: Response containing activation confirmation
+            - message: Success message
+            - endpoint: The generated endpoint URL for accessing the project
+    
+    Raises:
+        HTTPException: When activation fails
+            - 500: Failed to activate project with error details
+            - 500: Failed to get project endpoint if LoadBalancer IP is not ready
+    
+    Example:
+        Scales up the K8s deployment to 1 replica, waits for the pod to be ready,
+        retrieves the LoadBalancer IP/hostname, and updates project status in MongoDB
+    """
     try:
         # Scale up deployment
         k8s_service.scale_project(user_id, project_id, 1)
@@ -172,6 +287,24 @@ async def update_project_github_key(user_id: str, project_id: str, github_key_da
 
 @router.post("/users/{user_id}/projects/{project_id}/deactivate", operation_id="deactivate_project")
 async def deactivate_project(user_id: str, project_id: str):
+    """
+    Deactivate a project by scaling down its deployment.
+    
+    Args:
+        user_id (str): The ID of the user who owns the project
+        project_id (str): The ID of the project to deactivate
+    
+    Returns:
+        dict: Response containing deactivation confirmation
+            - message: Success message
+    
+    Raises:
+        HTTPException: When deactivation fails
+            - 500: Failed to deactivate project with error details
+    
+    Example:
+        Scales down the K8s deployment to 0 replicas and updates project status in MongoDB
+    """
     try:
         # Scale down deployment
         k8s_service.scale_project(user_id, project_id, 0)
@@ -687,7 +820,35 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
 
 @router.post("/users/{user_id}/projects/{project_id}/messages/send", operation_id="send_message_fire_and_forget")
 async def send_message_sync(user_id: str, project_id: str, message: MessageRequest):
-    """Send message to a specific session without streaming (fire-and-forget)"""
+    """
+    Send message to a specific session without streaming (fire-and-forget).
+    
+    Args:
+        user_id (str): The ID of the user who owns the project
+        project_id (str): The ID of the project containing the session
+        message (MessageRequest): Message request object containing:
+            - session_id: ID of the session to send the message to
+            - content: The message content to send
+    
+    Returns:
+        dict: Response containing confirmation and result details
+            - message: Success message
+            - result: Result details from the Goose API
+            - session_id: The ID of the session the message was sent to
+    
+    Raises:
+        HTTPException:
+            - 404: Project not found
+            - 404: Session not found in project
+            - 400: Project is not active
+            - 500: Project endpoint not available
+            - 500: Failed to connect to Goose API
+            - Various status codes from the Goose API with corresponding error details
+    
+    Example:
+        Sends message to the non-streaming endpoint of Goose API,
+        waits for the complete response before returning (non-streaming)
+    """
     # Get project to check if active
     project = mongodb_service.get_project(project_id)
     if not project:
