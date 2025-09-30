@@ -151,7 +151,7 @@ async def create_project(user_id: str, project: ProjectCreate):
         k8s_service.apply_project_resources(user_id, project_id, github_key, user_secret_exists)
 
         # Wait for pod to be ready - simple approach for POC
-        await asyncio.sleep(60)
+        await k8s_service.wait_for_pod_health(user_id, project_id)
 
         # Get LoadBalancer IP/hostname
         try:
@@ -295,7 +295,7 @@ async def activate_project(user_id: str, project_id: str):
         k8s_service.scale_project(user_id, project_id, 1)
 
         # Wait for pod to be ready - simple approach for POC
-        await asyncio.sleep(15)
+        await k8s_service.wait_for_pod_health(user_id, project_id)
 
         # Get LoadBalancer IP/hostname
         try:
