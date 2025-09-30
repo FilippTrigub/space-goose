@@ -15,10 +15,88 @@ load_dotenv()
 
 from routes import project_routes
 
+# Swagger UI Tags metadata
+tags_metadata = [
+    {
+        "name": "Users",
+        "description": "User management operations. Get available users in the system.",
+    },
+    {
+        "name": "Projects",
+        "description": "Project lifecycle management. Create, update, delete, activate and deactivate AI agent projects.",
+    },
+    {
+        "name": "GitHub Integration",
+        "description": "GitHub authentication and repository management for projects.",
+    },
+    {
+        "name": "Sessions",
+        "description": "AI conversation session management. Create and manage chat sessions with AI agents.",
+    },
+    {
+        "name": "Messaging",
+        "description": "Send messages to AI agents. Supports both streaming and fire-and-forget modes.",
+    },
+    {
+        "name": "Extensions",
+        "description": "Manage AI agent extensions. Add tools and capabilities to your AI agents.",
+    },
+    {
+        "name": "Settings",
+        "description": "Configure AI agent behavior and parameters.",
+    },
+    {
+        "name": "Agent Status",
+        "description": "Monitor AI agent health, activity, and performance metrics.",
+    },
+]
+
 app = FastAPI(
-    title="K8s Environment Manager",
-    version="0.1.0",
-    description="A PoC application for managing Kubernetes-isolated user environments",
+    title="Space Goose K8s Manager API",
+    version="1.0.0",
+    description="""
+    ## Space Goose K8s Manager
+    
+    A comprehensive API for managing Kubernetes-isolated AI agent environments. 
+    This system allows you to:
+    
+    * **Create and manage projects** - Isolated AI agent environments
+    * **GitHub integration** - Connect repositories to your AI agents  
+    * **Session management** - Handle AI conversation sessions
+    * **Real-time messaging** - Stream conversations with AI agents
+    * **Extension system** - Add tools and capabilities to AI agents
+    * **Settings control** - Configure AI behavior and parameters
+    * **Resource monitoring** - Track agent status and performance
+    
+    ### Quick Start
+    
+    1. Get available users: `GET /users`
+    2. Create a project: `POST /users/{user_id}/projects`
+    3. Activate the project: `POST /users/{user_id}/projects/{project_id}/activate`
+    4. Create a session: `POST /users/{user_id}/projects/{project_id}/sessions`
+    5. Start chatting: `POST /users/{user_id}/projects/{project_id}/messages`
+    
+    ### Authentication
+    
+    Currently uses user IDs in path parameters. Authentication tokens will be added in future versions.
+    
+    ### Environments
+    
+    - **Development**: `http://localhost:8000`
+    - **Swagger UI**: `http://localhost:8000/docs`
+    - **ReDoc**: `http://localhost:8000/redoc`
+    """,
+    openapi_tags=tags_metadata,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    contact={
+        "name": "Space Goose Team",
+        "email": "contact@spacegoose.dev",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
 )
 
 # Add CORS middleware for development
