@@ -133,7 +133,7 @@ async def create_project(user_id: str, project: ProjectCreate):
 
     # If no project GitHub key is provided, check if user has a global key
     github_key = project.github_key
-    if not github_key and mongodb_service.has_user_github_key(user_id):
+    if mongodb_service.has_user_github_key(user_id):
         # User has a global key, update project to show it's using a key
         project_data["github_key_set"] = True
         project_data["github_key_source"] = "user"
@@ -145,6 +145,8 @@ async def create_project(user_id: str, project: ProjectCreate):
         if user_secret_exists:
             # Use the user's global key but don't store it in the project
             print(f"Using global GitHub key for project {project_id}")
+    else:
+        user_secret_exists = False
 
     # Create K8s resources and activate
     try:

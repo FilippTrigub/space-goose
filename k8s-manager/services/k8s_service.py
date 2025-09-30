@@ -425,7 +425,7 @@ async def wait_for_pod_health(
     while time.time() - start_time < timeout_seconds:
         try:
             async with httpx.AsyncClient(
-                timeout=3.0
+                timeout=6.0
             ) as client:  # Longer timeout for startup
                 health_url = f"http://{endpoint}/api/v1/health"
                 response = await client.get(health_url)
