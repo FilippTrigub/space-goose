@@ -146,7 +146,12 @@ def ensure_namespace(user_id: str):
     return namespace
 
 
-def apply_project_resources(user_id: str, project_id: str, github_key: str = None, user_secret_exists: bool = False):
+def apply_project_resources(
+    user_id: str,
+    project_id: str,
+    github_key: str = None,
+    user_secret_exists: bool = False,
+):
     """
     Create Kubernetes resources for a project.
     """
@@ -356,37 +361,90 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
         raise e
 
 
-async def wait_for_pod_health(user_id: str, project_id: str, timeout_seconds: int = 120):
+async def wait_for_loadbalancer_ip(
+    user_id: str, project_id: str, timeout_seconds: int = 120
+):
     """
-    Wait for pod health endpoint to return 200.
+    Wait specifically for LoadBalancer IP assignment.
+    Separate from pod health - this is infrastructure-level waiting.
     """
     namespace = f"user-{user_id}"
-    endpoint = None
+    service_name = f"proj-{project_id}-api"
     start_time = time.time()
-    
-    print(f"⏳ Waiting for project {project_id} to become healthy...")
-    
+
+    print(f"⏳ Waiting for LoadBalancer IP assignment for {service_name}...")
+
     while time.time() - start_time < timeout_seconds:
         try:
-            # Get the endpoint
-            endpoint = get_project_endpoint(user_id, project_id)
-            
-            # Check health endpoint
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            service = core_v1.read_namespaced_service(
+                name=service_name, namespace=namespace
+            )
+
+            # Check if LoadBalancer has been assigned
+            if (
+                service.status
+                and service.status.load_balancer
+                and service.status.load_balancer.ingress
+                and len(service.status.load_balancer.ingress) > 0
+            ):
+
+                ingress = service.status.load_balancer.ingress[0]
+                if ingress.ip:
+                    print(f"✅ LoadBalancer IP assigned: {ingress.ip}")
+                    return ingress.ip
+                elif ingress.hostname:
+                    print(f"✅ LoadBalancer hostname assigned: {ingress.hostname}")
+                    return ingress.hostname
+
+        except ApiException as e:
+            if e.status == 404:
+                print(f"⏳ Service {service_name} not found, waiting...")
+            else:
+                print(f"⏳ Error checking service: {e}")
+
+        elapsed = int(time.time() - start_time)
+        print(f"⏳ LoadBalancer IP not ready yet, waiting... ({elapsed}s elapsed)")
+        await asyncio.sleep(3)  # Check every 10 seconds for infrastructure
+
+    raise Exception(
+        f"LoadBalancer IP assignment timed out after {timeout_seconds} seconds"
+    )
+
+
+async def wait_for_pod_health(
+    user_id: str, project_id: str, endpoint: str, timeout_seconds: int = 120
+):
+    """
+    Wait for pod health endpoint to return 200.
+    Assumes endpoint is already available (from LoadBalancer).
+    """
+    start_time = time.time()
+
+    print(f"⏳ Waiting for pod health at {endpoint}...")
+
+    while time.time() - start_time < timeout_seconds:
+        try:
+            async with httpx.AsyncClient(
+                timeout=3.0
+            ) as client:  # Longer timeout for startup
                 health_url = f"http://{endpoint}/api/v1/health"
                 response = await client.get(health_url)
-                
+
                 if response.status_code == 200:
-                    print(f"✅ Pod is healthy! Health endpoint responding at: {health_url}")
-                    return endpoint
+                    print(
+                        f"✅ Pod is healthy! Health endpoint responding at: {health_url}"
+                    )
+                    return True
                 else:
-                    print(f"⏳ Health check failed with status {response.status_code}, retrying...")
-                    
+                    elapsed = int(time.time() - start_time)
+                    print(
+                        f"⏳ Health check returned {response.status_code}, retrying... ({elapsed}s elapsed)"
+                    )
+
         except Exception as e:
-            print(f"⏳ Health check failed: {e}, retrying...")
-        
-        await asyncio.sleep(5)  # Wait 5 seconds before retry
-    
+            elapsed = int(time.time() - start_time)
+            print(f"⏳ Health check failed: {e.__class__}, retrying... ({elapsed}s elapsed)")
+
     raise Exception(f"Pod health check timed out after {timeout_seconds} seconds")
 
 
@@ -396,21 +454,20 @@ def get_pod_name(user_id: str, project_id: str):
     """
     namespace = f"user-{user_id}"
     deployment_name = f"proj-{project_id}-api"
-    
+
     try:
         # List pods with the deployment label
         pods = core_v1.list_namespaced_pod(
-            namespace=namespace,
-            label_selector=f"app={deployment_name}"
+            namespace=namespace, label_selector=f"app={deployment_name}"
         )
-        
+
         for pod in pods.items:
             if pod.status.phase == "Running":
                 print(f"✓ Found running pod: {pod.metadata.name}")
                 return pod.metadata.name
-        
+
         raise Exception(f"No running pods found for deployment {deployment_name}")
-        
+
     except ApiException as e:
         if e.status == 404:
             raise Exception(f"No pods found for deployment {deployment_name}")
@@ -427,16 +484,16 @@ def execute_git_clone(user_id: str, project_id: str, repo_url: str):
     Execute git clone command on the running pod.
     """
     namespace = f"user-{user_id}"
-    
+
     try:
         # Get the pod name
         pod_name = get_pod_name(user_id, project_id)
-        
+
         print(f"🔧 Executing git clone on pod {pod_name}")
         print(f"📦 Repository: {repo_url}")
-        
+
         # Build the clone command
-        clone_script = f'''
+        clone_script = f"""
 set -e
 echo "🔧 Starting repository clone..."
 echo "📦 Repository URL: {repo_url}"
@@ -445,11 +502,11 @@ AUTHENTICATED_URL="https://${{GITHUB_PERSONAL_ACCESS_TOKEN}}@github.com/${{REPO_
 echo "🌐 Formulated authenticated URL..."
 git clone "$AUTHENTICATED_URL"
 echo "🎉 Repository clone completed successfully!"
-'''
+"""
 
         # Execute the command on the pod
-        exec_command = ['/bin/sh', '-c', clone_script]
-        
+        exec_command = ["/bin/sh", "-c", clone_script]
+
         resp = stream(
             core_v1.connect_get_namespaced_pod_exec,
             pod_name,
@@ -458,12 +515,12 @@ echo "🎉 Repository clone completed successfully!"
             stderr=True,
             stdin=False,
             stdout=True,
-            tty=False
+            tty=False,
         )
-        
+
         print(f"📄 Clone command output:")
         print(resp)
-        
+
         # Check if the command succeeded (basic check)
         if "✅" in resp and "completed successfully" in resp:
             print(f"✅ Git clone executed successfully on pod {pod_name}")
@@ -471,7 +528,7 @@ echo "🎉 Repository clone completed successfully!"
         else:
             print(f"❌ Git clone may have failed. Output: {resp}")
             raise Exception(f"Git clone command failed: {resp}")
-            
+
     except ApiException as e:
         print(f"✗ Failed to execute git clone: {e}")
         raise e
@@ -480,22 +537,21 @@ echo "🎉 Repository clone completed successfully!"
         raise e
 
 
-async def clone_repository_on_pod(user_id: str, project_id: str, repo_url: str):
+async def clone_repository_on_pod(
+    user_id: str, project_id: str, repo_url: str, endpoint: str
+):
     """
-    Wait for pod health, then execute git clone command.
+    Execute git clone command on pod.
+    Assumes pod health has already been verified.
     """
     try:
-        # Step 1: Wait for pod to be healthy
-        print(f"🏥 Waiting for pod health check...")
-        endpoint = await wait_for_pod_health(user_id, project_id)
-        
-        # Step 2: Execute git clone command
+        # Execute git clone command
         print(f"📂 Executing git clone command...")
         execute_git_clone(user_id, project_id, repo_url)
-        
+
         print(f"🎉 Repository {repo_url} successfully cloned to project {project_id}")
         return True
-        
+
     except Exception as e:
         print(f"❌ Failed to clone repository: {e}")
         raise e
@@ -540,6 +596,8 @@ def scale_project(user_id: str, project_id: str, replicas: int):
 def get_project_endpoint(user_id: str, project_id: str):
     """
     Get the LoadBalancer IP for a project service.
+    This now assumes the endpoint exists (for use after creation).
+    Returns None if not available instead of throwing exceptions.
     """
     if os.getenv("DEV_ENV") == "1":
         return "localhost:3001"
@@ -548,12 +606,10 @@ def get_project_endpoint(user_id: str, project_id: str):
     service_name = f"proj-{project_id}-api"
 
     try:
-        # Read the service to get LoadBalancer status
         service = core_v1.read_namespaced_service(
             name=service_name, namespace=namespace
         )
 
-        # Check if service has LoadBalancer ingress
         if (
             service.status
             and service.status.load_balancer
@@ -569,14 +625,12 @@ def get_project_endpoint(user_id: str, project_id: str):
                 print(f"✓ Found LoadBalancer hostname: {ingress.hostname}")
                 return ingress.hostname
 
-        # If no LoadBalancer IP is available yet
-        raise Exception(f"LoadBalancer IP not yet assigned for service {service_name}")
+        # For existing projects, return None instead of throwing
+        return None
 
     except ApiException as e:
         if e.status == 404:
-            raise Exception(
-                f"Service {service_name} not found in namespace {namespace}"
-            )
+            return None
         else:
             print(f"✗ Failed to get service {service_name}: {e}")
             raise e
@@ -677,9 +731,9 @@ def update_github_secret(user_id: str, project_id: str, github_key: str = None):
 
             # Update secret data
             secret_data = {
-                "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
-                    "utf-8"
-                )
+                "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(
+                    github_key.encode("utf-8")
+                ).decode("utf-8")
             }
             existing_secret.data = secret_data
 
@@ -694,9 +748,9 @@ def update_github_secret(user_id: str, project_id: str, github_key: str = None):
             if e.status == 404:
                 # Secret doesn't exist, create it
                 secret_data = {
-                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
-                        "utf-8"
-                    )
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(
+                        github_key.encode("utf-8")
+                    ).decode("utf-8")
                 }
                 secret_body = client.V1Secret(
                     metadata=client.V1ObjectMeta(
@@ -794,9 +848,9 @@ def create_or_update_user_github_secret(user_id: str, github_key: str):
 
             # Update secret data
             secret_data = {
-                "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
-                    "utf-8"
-                )
+                "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(
+                    github_key.encode("utf-8")
+                ).decode("utf-8")
             }
             existing_secret.data = secret_data
 
@@ -811,9 +865,9 @@ def create_or_update_user_github_secret(user_id: str, github_key: str):
             if e.status == 404:
                 # Secret doesn't exist, create it
                 secret_data = {
-                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
-                        "utf-8"
-                    )
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(
+                        github_key.encode("utf-8")
+                    ).decode("utf-8")
                 }
                 secret_body = client.V1Secret(
                     metadata=client.V1ObjectMeta(
