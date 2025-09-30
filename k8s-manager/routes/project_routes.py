@@ -154,6 +154,9 @@ async def create_project(user_id: str, project: ProjectCreate):
 
         # Wait for LoadBalancer IP assignment first
         endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
+        
+        # Wait for pod readiness
+        await k8s_service.wait_for_pod_readiness(user_id, project_id)
 
         # Then wait for pod to be healthy
         await k8s_service.wait_for_pod_health(user_id, project_id, endpoint)
@@ -290,6 +293,9 @@ async def activate_project(user_id: str, project_id: str):
 
         # Wait for LoadBalancer IP assignment first
         endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
+        
+        # Wait for pod readiness
+        await k8s_service.wait_for_pod_readiness(user_id, project_id)
 
         # Then wait for pod to be healthy
         await k8s_service.wait_for_pod_health(user_id, project_id, endpoint)

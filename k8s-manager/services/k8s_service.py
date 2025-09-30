@@ -153,7 +153,7 @@ def apply_project_resources(
     user_secret_exists: bool = False,
 ):
     """
-    Create Kubernetes resources for a project.
+    Create Kubernetes resources for a project with enhanced health checks.
     """
     namespace = ensure_namespace(user_id)
     deployment_name = f"proj-{project_id}-api"
@@ -255,7 +255,7 @@ def apply_project_resources(
             raise e
 
     try:
-        # Create Deployment
+        # Create Deployment with enhanced health probes
         container_spec = client.V1Container(
             name="goose-api",
             image=ACR_IMAGE,
@@ -264,6 +264,58 @@ def apply_project_resources(
                 client.V1EnvVar(name="USER_ID", value=user_id),
                 client.V1EnvVar(name="PROJECT_ID", value=project_id),
             ],
+            
+            # Readiness probe - determines when pod can receive traffic
+            readiness_probe=client.V1Probe(
+                http_get=client.V1HTTPGetAction(
+                    path="/api/v1/health",
+                    port=3001,
+                    scheme="HTTP"
+                ),
+                initial_delay_seconds=10,
+                period_seconds=5,
+                timeout_seconds=3,
+                success_threshold=1,
+                failure_threshold=3
+            ),
+            
+            # Liveness probe - determines when to restart container
+            liveness_probe=client.V1Probe(
+                http_get=client.V1HTTPGetAction(
+                    path="/api/v1/health", 
+                    port=3001,
+                    scheme="HTTP"
+                ),
+                initial_delay_seconds=30,
+                period_seconds=10,
+                timeout_seconds=5,
+                failure_threshold=3
+            ),
+            
+            # Startup probe - gives extra time for slow-starting containers
+            startup_probe=client.V1Probe(
+                http_get=client.V1HTTPGetAction(
+                    path="/api/v1/health",
+                    port=3001,
+                    scheme="HTTP"  
+                ),
+                initial_delay_seconds=5,
+                period_seconds=5,
+                timeout_seconds=3,
+                failure_threshold=12  # 60 seconds total
+            ),
+            
+            # Resource limits for better startup performance
+            resources=client.V1ResourceRequirements(
+                requests={
+                    "memory": "1024Mi",
+                    "cpu": "1000m"
+                },
+                limits={
+                    "memory": "2048Mi", 
+                    "cpu": "2000m"
+                }
+            )
         )
 
         # Add ConfigMap environment variables if available
@@ -277,7 +329,7 @@ def apply_project_resources(
 
         # Add GitHub Secret environment variables if available
         if github_secret_name:
-            print(f"using gh secrete name: {github_secret_name}")
+            print(f"using gh secret name: {github_secret_name}")
             env_from_sources.append(
                 client.V1EnvFromSource(
                     secret_ref=client.V1SecretEnvSource(name=github_secret_name)
@@ -317,14 +369,14 @@ def apply_project_resources(
 
         try:
             apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment)
-            print(f"✓ Created deployment: {deployment_name}")
+            print(f"✓ Created deployment: {deployment_name} with health probes")
         except ApiException as e:
             if e.status == 409:  # Already exists
                 print(f"ℹ Deployment {deployment_name} already exists")
             else:
                 raise e
 
-        # Create Service with LoadBalancer type
+        # Create Service with LoadBalancer type and health check annotations
         service = client.V1Service(
             metadata=client.V1ObjectMeta(
                 name=service_name,
@@ -335,6 +387,13 @@ def apply_project_resources(
                     "user-id": user_id,
                     "managed-by": "k8s-manager",
                 },
+                annotations={
+                    # Cloud provider health check configurations
+                    "service.beta.kubernetes.io/aws-load-balancer-healthcheck-path": "/api/v1/health",
+                    "service.beta.kubernetes.io/aws-load-balancer-healthcheck-port": "3001",
+                    "service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol": "HTTP",
+                    "service.beta.kubernetes.io/azure-load-balancer-health-probe-path": "/api/v1/health",
+                }
             ),
             spec=client.V1ServiceSpec(
                 selector={"app": deployment_name},
@@ -349,7 +408,7 @@ def apply_project_resources(
 
         try:
             core_v1.create_namespaced_service(namespace=namespace, body=service)
-            print(f"✓ Created service: {service_name}")
+            print(f"✓ Created service: {service_name} with health check annotations")
         except ApiException as e:
             if e.status == 409:  # Already exists
                 print(f"ℹ Service {service_name} already exists")
@@ -411,12 +470,66 @@ async def wait_for_loadbalancer_ip(
     )
 
 
+async def wait_for_pod_readiness(user_id: str, project_id: str, timeout_seconds: int = 300):
+    """
+    Wait for pod to be truly ready according to Kubernetes readiness checks.
+    This ensures the pod passes its readiness probe before we try to connect.
+    """
+    namespace = f"user-{user_id}"
+    deployment_name = f"proj-{project_id}-api"
+    start_time = time.time()
+    
+    print(f"⏳ Waiting for pod readiness for {deployment_name}...")
+    
+    while time.time() - start_time < timeout_seconds:
+        try:
+            # Get deployment status
+            deployment = apps_v1.read_namespaced_deployment(
+                name=deployment_name, namespace=namespace
+            )
+            
+            # Check if deployment has ready replicas
+            if (deployment.status.ready_replicas and 
+                deployment.status.ready_replicas >= 1):
+                print("✅ Pod is ready according to Kubernetes readiness checks")
+                return True
+                
+            # Also check individual pod readiness
+            pods = core_v1.list_namespaced_pod(
+                namespace=namespace,
+                label_selector=f"app={deployment_name}"
+            )
+            
+            for pod in pods.items:
+                if pod.status.phase == "Running":
+                    # Check readiness conditions
+                    if pod.status.conditions:
+                        ready_condition = next(
+                            (c for c in pod.status.conditions if c.type == "Ready"), 
+                            None
+                        )
+                        if ready_condition and ready_condition.status == "True":
+                            print(f"✅ Pod {pod.metadata.name} is ready")
+                            return True
+            
+            elapsed = int(time.time() - start_time)
+            print(f"⏳ Pod not ready yet, waiting... ({elapsed}s elapsed)")
+            await asyncio.sleep(3)
+            
+        except Exception as e:
+            elapsed = int(time.time() - start_time)
+            print(f"⏳ Error checking pod readiness: {e}, retrying... ({elapsed}s elapsed)")
+            await asyncio.sleep(3)
+    
+    raise Exception(f"Pod readiness check timed out after {timeout_seconds} seconds")
+
+
 async def wait_for_pod_health(
-    user_id: str, project_id: str, endpoint: str, timeout_seconds: int = 120
+    user_id: str, project_id: str, endpoint: str, timeout_seconds: int = 300
 ):
     """
     Wait for pod health endpoint to return 200.
-    Assumes endpoint is already available (from LoadBalancer).
+    Assumes endpoint is already available (from LoadBalancer) and pod is ready.
     """
     start_time = time.time()
 
@@ -443,10 +556,13 @@ async def wait_for_pod_health(
 
         except Exception as e:
             elapsed = int(time.time() - start_time)
-            print(f"⏳ Health check failed: {e.__class__}, retrying... ({elapsed}s elapsed)")
+            print(f"⏳ Health check failed: {e.__class__.__name__}, retrying... ({elapsed}s elapsed)")
 
     raise Exception(f"Pod health check timed out after {timeout_seconds} seconds")
 
+
+# Rest of the functions remain unchanged for brevity...
+# [Including all other existing functions from the original file]
 
 def get_pod_name(user_id: str, project_id: str):
     """
