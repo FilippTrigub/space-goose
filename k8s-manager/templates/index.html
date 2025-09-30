@@ -1007,12 +1007,20 @@
         <div class="modal-overlay" id="create-modal">
             <div class="modal">
                 <div class="modal-header">
-                    <h3>Create New Project</h3>
+                    <h3>📦 Create New Project</h3>
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
                         <label for="project-name-input">Project Name</label>
                         <input type="text" id="project-name-input" placeholder="Enter a descriptive project name...">
+                    </div>
+                    <div class="form-group">
+                        <label for="repo-url-input">GitHub Repository URL (Optional)</label>
+                        <input type="url" id="repo-url-input" placeholder="https://github.com/username/repository.git">
+                        <small class="form-help">
+                            If provided, the repository will be cloned into the project workspace on startup.
+                            Requires GitHub token for private repositories.
+                        </small>
                     </div>
                     <div class="form-group">
                         <label for="github-token-source">GitHub Token</label>
@@ -1787,6 +1795,19 @@
             }
         }
 
+        function getRepositoryDisplayName(repoUrl) {
+            if (!repoUrl) return null;
+            
+            // Extract repository name from URL
+            const match = repoUrl.match(/github\.com\/([^\/]+\/[^\/]+?)(?:\.git)?(?:\/)?$/);
+            if (match) {
+                return match[1]; // Returns "username/repo"
+            }
+            
+            // Fallback to last part of URL
+            return repoUrl.split('/').pop() || 'Unknown';
+        }
+
         function renderProjects(projectList) {
             const grid = document.getElementById('projects-grid');
 
@@ -1806,7 +1827,7 @@
                 <div class="create-card" onclick="openCreateModal()">
                     <div class="create-icon">+</div>
                     <h3>Create New Project</h3>
-                    <p>Set up a new Kubernetes environment</p>
+                    <p>Set up a new Kubernetes environment with optional GitHub repository</p>
                 </div>
             `;
 
@@ -1826,6 +1847,7 @@
                 const createdDate = project.created_at ? new Date(project.created_at).toLocaleDateString() : 'Unknown';
                 const sessions = project.sessions || [];
                 const githubStatus = getGitHubTokenStatus(project);
+                const repoDisplayName = getRepositoryDisplayName(project.repo_url);
 
                 // Determine session action button
                 let sessionButton = '';
@@ -1881,6 +1903,7 @@
                             <div><span>Created:</span> <span>${createdDate}</span></div>
                             <div><span>Status:</span> <span>${isActive ? '🟢 Running' : '🔴 Stopped'}</span></div>
                             <div><span>GitHub:</span> <span class="${githubStatus.class}">${githubStatus.text}</span></div>
+                            ${project.repo_url ? `<div><span>Repository:</span> <span title="${project.repo_url}">📂 ${repoDisplayName}</span></div>` : ''}
                             ${project.endpoint ? `<div><span>Endpoint:</span> <span>${project.endpoint}</span></div>` : ''}
                         </div>
                         
@@ -1927,6 +1950,7 @@
             const cancelBtn = document.getElementById('cancel-create-btn');
             const confirmBtn = document.getElementById('confirm-create-btn');
             const projectNameInput = document.getElementById('project-name-input');
+            const repoUrlInput = document.getElementById('repo-url-input');
             const githubTokenSource = document.getElementById('github-token-source');
             const projectGithubKeyGroup = document.getElementById('project-github-key-group');
             const githubTokenStatus = document.getElementById('github-token-status');
@@ -1934,6 +1958,11 @@
             // Handle token source change
             githubTokenSource.addEventListener('change', () => {
                 updateGitHubTokenSourceDisplay();
+            });
+
+            // Handle repository URL changes to show helpful hints
+            repoUrlInput.addEventListener('input', () => {
+                updateRepositoryUrlHints();
             });
 
             cancelBtn.addEventListener('click', () => {
@@ -1953,6 +1982,17 @@
 
             // Handle Enter key in inputs
             projectNameInput.addEventListener('keypress', async (e) => {
+                if (e.key === 'Enter') {
+                    const name = projectNameInput.value.trim();
+                    if (!name) {
+                        showAlert('Please enter a project name', 'error');
+                        return;
+                    }
+                    await createProject(name);
+                }
+            });
+
+            repoUrlInput.addEventListener('keypress', async (e) => {
                 if (e.key === 'Enter') {
                     const name = projectNameInput.value.trim();
                     if (!name) {
@@ -2006,6 +2046,33 @@
             });
         }
 
+        function updateRepositoryUrlHints() {
+            const repoUrl = document.getElementById('repo-url-input').value.trim();
+            const tokenSource = document.getElementById('github-token-source').value;
+            const tokenStatus = document.getElementById('github-token-status');
+            
+            if (repoUrl) {
+                // Check if it looks like a private repository URL pattern
+                const isGithubUrl = repoUrl.includes('github.com');
+                const isPrivatePattern = !repoUrl.includes('github.com/public') && isGithubUrl;
+                
+                if (isPrivatePattern && tokenSource === 'none') {
+                    tokenStatus.innerHTML = '⚠️ Repository URL provided but no GitHub token selected. Private repositories will fail to clone.';
+                    tokenStatus.className = 'form-status warning';
+                    tokenStatus.style.display = 'block';
+                } else if (isGithubUrl && (tokenSource === 'global' || tokenSource === 'project')) {
+                    const tokenTypeText = tokenSource === 'global' ? 'global' : 'project-specific';
+                    tokenStatus.innerHTML = `✅ Repository will be cloned using your ${tokenTypeText} GitHub token.`;
+                    tokenStatus.className = 'form-status success';
+                    tokenStatus.style.display = 'block';
+                } else {
+                    updateGitHubTokenSourceDisplay(); // Fall back to normal display
+                }
+            } else {
+                updateGitHubTokenSourceDisplay(); // Fall back to normal display
+            }
+        }
+
         function updateGitHubTokenSourceDisplay() {
             const tokenSource = document.getElementById('github-token-source').value;
             const projectKeyGroup = document.getElementById('project-github-key-group');
@@ -2043,10 +2110,12 @@
             const modal = document.getElementById('create-modal');
             const input = document.getElementById('project-name-input');
             const githubInput = document.getElementById('github-key-input');
+            const repoInput = document.getElementById('repo-url-input');
             const tokenSource = document.getElementById('github-token-source');
 
             input.value = '';
             githubInput.value = '';
+            repoInput.value = '';
             
             // Set default token source based on whether user has global token
             if (userGitHubKeySet) {
@@ -2435,6 +2504,7 @@
             const confirmBtn = document.getElementById('confirm-create-btn');
             const spinner = confirmBtn.querySelector('.spinner');
             const tokenSource = document.getElementById('github-token-source').value;
+            const repoUrl = document.getElementById('repo-url-input').value.trim();
 
             try {
                 confirmBtn.disabled = true;
@@ -2442,11 +2512,18 @@
 
                 const requestBody = { name };
                 
+                // Add repository URL if provided
+                if (repoUrl) {
+                    requestBody.repo_url = repoUrl;
+                }
+                
                 // Only include GitHub key if using project-specific token
                 if (tokenSource === 'project') {
                     const githubKey = document.getElementById('github-key-input').value.trim();
                     if (!githubKey) {
                         showAlert('Please enter a GitHub token or choose a different option', 'error');
+                        confirmBtn.disabled = false;
+                        spinner.style.display = 'none';
                         return;
                     }
                     requestBody.github_key = githubKey;
@@ -2460,7 +2537,10 @@
                 });
 
                 if (response.ok) {
-                    showAlert('Project created successfully!', 'success');
+                    const successMessage = repoUrl ? 
+                        'Project created successfully! Repository is being cloned...' : 
+                        'Project created successfully!';
+                    showAlert(successMessage, 'success');
                     closeCreateModal();
                     await loadProjects(currentUser);
                 } else {
@@ -2527,9 +2607,13 @@
                 toggleBtn.disabled = true;
 
                 if (isActivating) {
+                    // Check if project has repository for longer wait time
+                    const project = projects.find(p => p.id === projectId);
+                    const hasRepo = project?.repo_url;
+                    
                     toggleBtn.innerHTML = `
                         <span class="spinner"></span>
-                        Activating...
+                        ${hasRepo ? 'Cloning & Starting...' : 'Activating...'}
                     `;
                 } else {
                     toggleBtn.innerHTML = `
@@ -2677,12 +2761,14 @@
             newSessionBtn.disabled = !hasActiveProject;
 
             if (hasActiveProject) {
-                projectInfo.innerHTML = `<span class="status-badge status-active"><div class="status-dot"></div> ${escapeHtml(projectName)}</span>`;
+                const project = projects.find(p => p.id === activeProject);
+                const repoInfo = project?.repo_url ? ` (📂 ${getRepositoryDisplayName(project.repo_url)})` : '';
+                projectInfo.innerHTML = `<span class="status-badge status-active"><div class="status-dot"></div> ${escapeHtml(projectName)}${repoInfo}</span>`;
 
                 if (hasActiveSession) {
-                    messageOutput.textContent = `Connected to project: ${projectName}\nSession: ${sessionName}\nReady to send messages...`;
+                    messageOutput.textContent = `Connected to project: ${projectName}${repoInfo}\nSession: ${sessionName}\nReady to send messages...`;
                 } else {
-                    messageOutput.textContent = `Project: ${projectName}\nPlease select or create a session to start chatting...`;
+                    messageOutput.textContent = `Project: ${projectName}${repoInfo}\nPlease select or create a session to start chatting...`;
                 }
             } else {
                 projectInfo.innerHTML = '';
@@ -2928,7 +3014,9 @@
                     messageOutput.textContent = '';
 
                     if (messages.length === 0) {
-                        messageOutput.textContent = `📝 Session History\n\n💭 No previous messages in this session.\n\n✨ Ready to start a new conversation!`;
+                        const project = projects.find(p => p.id === projectId);
+                        const repoContext = project?.repo_url ? `\n📂 Working in repository: ${getRepositoryDisplayName(project.repo_url)}` : '';
+                        messageOutput.textContent = `📝 Session History\n\n💭 No previous messages in this session.${repoContext}\n\n✨ Ready to start a new conversation!`;
                     } else {
                         messageOutput.textContent = `📝 Session History (${messages.length} messages)\n\n`;
 

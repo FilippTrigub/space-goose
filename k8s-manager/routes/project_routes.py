@@ -59,6 +59,8 @@ async def get_projects(user_id: str):
             - status: Current status (active/inactive)
             - endpoint: URL endpoint when active
             - github_key_set: Whether GitHub key is configured
+            - repo_url: GitHub repository URL if set
+            - has_repository: Whether project has a repository configured
             - sessions: List of associated sessions
             - created_at: Creation timestamp
             - updated_at: Last update timestamp
@@ -78,6 +80,9 @@ async def get_projects(user_id: str):
             "status": project["status"],
             "endpoint": project.get("endpoint"),
             "github_key_set": project.get("github_key_set", False),
+            "github_key_source": project.get("github_key_source"),
+            "repo_url": project.get("repo_url"),
+            "has_repository": project.get("has_repository", False),
             "sessions": project.get("sessions", []),
             "created_at": project.get("created_at"),
             "updated_at": project.get("updated_at"),
@@ -96,6 +101,7 @@ async def create_project(user_id: str, project: ProjectCreate):
         project (ProjectCreate): Project creation data containing:
             - name: Name for the new project
             - github_key (optional): GitHub API key for repository access
+            - repo_url (optional): GitHub repository URL to clone
 
     Returns:
         dict: Response containing project creation confirmation
@@ -109,6 +115,7 @@ async def create_project(user_id: str, project: ProjectCreate):
     Example:
         Creates a project record in MongoDB and corresponding K8s resources
         If GitHub key is provided, it's stored securely for the project
+        If repo_url is provided, repository will be cloned after pod is healthy
     """
     project_data = {
         "user_id": user_id,
@@ -116,6 +123,8 @@ async def create_project(user_id: str, project: ProjectCreate):
         "status": "inactive",
         "sessions": [],
         "github_key_set": bool(project.github_key),
+        "repo_url": project.repo_url,
+        "has_repository": bool(project.repo_url),
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
@@ -137,12 +146,12 @@ async def create_project(user_id: str, project: ProjectCreate):
             # Use the user's global key but don't store it in the project
             print(f"Using global GitHub key for project {project_id}")
 
-    # Create K8s resources but don't activate yet
+    # Create K8s resources and activate
     try:
-        k8s_service.apply_project_resources(user_id, project_id, github_key)
+        k8s_service.apply_project_resources(user_id, project_id, github_key, user_secret_exists)
 
         # Wait for pod to be ready - simple approach for POC
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
 
         # Get LoadBalancer IP/hostname
         try:
@@ -154,6 +163,18 @@ async def create_project(user_id: str, project: ProjectCreate):
                 status_code=500,
                 detail=f"Failed to get project endpoint: {str(e)}. LoadBalancer IP may not be ready yet.",
             )
+
+        # If repository URL is provided, clone it after pod is healthy
+        if project.repo_url:
+            try:
+                print(f"📂 Cloning repository: {project.repo_url}")
+                await k8s_service.clone_repository_on_pod(user_id, project_id, project.repo_url)
+                print(f"✅ Repository cloned successfully")
+            except Exception as e:
+                print(f"❌ Repository cloning failed: {e}")
+                # Don't fail the entire project creation, just log the error
+                # The project is still usable without the repository
+                pass
 
         # Update status in MongoDB
         mongodb_service.update_project_status(project_id, "active", endpoint)
@@ -262,8 +283,14 @@ async def activate_project(user_id: str, project_id: str):
     Example:
         Scales up the K8s deployment to 1 replica, waits for the pod to be ready,
         retrieves the LoadBalancer IP/hostname, and updates project status in MongoDB
+        If project has a repository URL, it will be cloned after health check
     """
     try:
+        # Get project data to check for repository
+        project = mongodb_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
         # Scale up deployment
         k8s_service.scale_project(user_id, project_id, 1)
 
@@ -281,6 +308,18 @@ async def activate_project(user_id: str, project_id: str):
                 detail=f"Failed to get project endpoint: {str(e)}. LoadBalancer IP may not be ready yet.",
             )
 
+        # If repository URL is provided, clone it after pod is healthy
+        repo_url = project.get("repo_url")
+        if repo_url:
+            try:
+                print(f"📂 Cloning repository on activation: {repo_url}")
+                await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url)
+                print(f"✅ Repository cloned successfully")
+            except Exception as e:
+                print(f"❌ Repository cloning failed: {e}")
+                # Don't fail activation, repository can be cloned later
+                pass
+
         # Update status in MongoDB
         mongodb_service.update_project_status(project_id, "active", endpoint)
 
@@ -288,6 +327,44 @@ async def activate_project(user_id: str, project_id: str):
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to activate project: {str(e)}"
+        )
+
+
+# New endpoint for manual repository cloning
+@router.post(
+    "/users/{user_id}/projects/{project_id}/clone-repository",
+    operation_id="clone_repository"
+)
+async def clone_repository(user_id: str, project_id: str):
+    """
+    Manually clone the repository for an active project.
+    """
+    try:
+        # Get project data
+        project = mongodb_service.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Project belongs to different user")
+
+        if project["status"] != "active":
+            raise HTTPException(status_code=400, detail="Project must be active to clone repository")
+
+        repo_url = project.get("repo_url")
+        if not repo_url:
+            raise HTTPException(status_code=400, detail="No repository URL configured for this project")
+
+        # Clone the repository
+        await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url)
+
+        return {"message": f"Repository {repo_url} cloned successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clone repository: {str(e)}"
         )
 
 

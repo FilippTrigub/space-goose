@@ -1,9 +1,13 @@
 import os
 import base64
 import tempfile
+import time
+import httpx
+import asyncio
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
+from kubernetes.stream import stream
 
 ACR_IMAGE = os.getenv("ACR_IMAGE")
 KUBE_CONFIG = os.getenv("KUBECONFIG")
@@ -142,7 +146,7 @@ def ensure_namespace(user_id: str):
     return namespace
 
 
-def apply_project_resources(user_id: str, project_id: str, github_key: str = None):
+def apply_project_resources(user_id: str, project_id: str, github_key: str = None, user_secret_exists: bool = False):
     """
     Create Kubernetes resources for a project.
     """
@@ -203,8 +207,9 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
         raise e
 
     # Create GitHub Key Secret if provided
-    github_secret_created = False
     github_secret_name = None
+    if user_secret_exists:
+        github_secret_name = f"user-user2-github-key"
     if github_key:
         github_secret_name = f"proj-{project_id}-github-key"
         try:
@@ -213,7 +218,6 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
             print(
                 f"ℹ GitHub Secret {github_secret_name} already exists in namespace {namespace}"
             )
-            github_secret_created = True
         except ApiException as e:
             if e.status == 404:
                 # Secret doesn't exist, create it
@@ -238,7 +242,6 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
                 print(
                     f"✓ Created GitHub Secret {github_secret_name} in namespace {namespace}"
                 )
-                github_secret_created = True
             else:
                 print(f"✗ Failed to check GitHub Secret: {e}")
                 raise e
@@ -268,7 +271,8 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
             )
 
         # Add GitHub Secret environment variables if available
-        if github_secret_created and github_secret_name:
+        if github_secret_name:
+            print(f"using gh secrete name: {github_secret_name}")
             env_from_sources.append(
                 client.V1EnvFromSource(
                     secret_ref=client.V1SecretEnvSource(name=github_secret_name)
@@ -278,6 +282,7 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
         if env_from_sources:
             container_spec.env_from = env_from_sources
 
+        print(f"setting env from: {container_spec.env_from}")
         deployment = client.V1Deployment(
             metadata=client.V1ObjectMeta(
                 name=deployment_name,
@@ -348,6 +353,151 @@ def apply_project_resources(user_id: str, project_id: str, github_key: str = Non
 
     except Exception as e:
         print(f"✗ Failed to create resources for project {project_id}: {e}")
+        raise e
+
+
+async def wait_for_pod_health(user_id: str, project_id: str, timeout_seconds: int = 120):
+    """
+    Wait for pod health endpoint to return 200.
+    """
+    namespace = f"user-{user_id}"
+    endpoint = None
+    start_time = time.time()
+    
+    print(f"⏳ Waiting for project {project_id} to become healthy...")
+    
+    while time.time() - start_time < timeout_seconds:
+        try:
+            # Get the endpoint
+            endpoint = get_project_endpoint(user_id, project_id)
+            
+            # Check health endpoint
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                health_url = f"http://{endpoint}/api/v1/health"
+                response = await client.get(health_url)
+                
+                if response.status_code == 200:
+                    print(f"✅ Pod is healthy! Health endpoint responding at: {health_url}")
+                    return endpoint
+                else:
+                    print(f"⏳ Health check failed with status {response.status_code}, retrying...")
+                    
+        except Exception as e:
+            print(f"⏳ Health check failed: {e}, retrying...")
+        
+        await asyncio.sleep(5)  # Wait 5 seconds before retry
+    
+    raise Exception(f"Pod health check timed out after {timeout_seconds} seconds")
+
+
+def get_pod_name(user_id: str, project_id: str):
+    """
+    Get the first running pod name for a project.
+    """
+    namespace = f"user-{user_id}"
+    deployment_name = f"proj-{project_id}-api"
+    
+    try:
+        # List pods with the deployment label
+        pods = core_v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"app={deployment_name}"
+        )
+        
+        for pod in pods.items:
+            if pod.status.phase == "Running":
+                print(f"✓ Found running pod: {pod.metadata.name}")
+                return pod.metadata.name
+        
+        raise Exception(f"No running pods found for deployment {deployment_name}")
+        
+    except ApiException as e:
+        if e.status == 404:
+            raise Exception(f"No pods found for deployment {deployment_name}")
+        else:
+            print(f"✗ Failed to list pods: {e}")
+            raise e
+    except Exception as e:
+        print(f"✗ Unexpected error listing pods: {e}")
+        raise e
+
+
+def execute_git_clone(user_id: str, project_id: str, repo_url: str):
+    """
+    Execute git clone command on the running pod.
+    """
+    namespace = f"user-{user_id}"
+    
+    try:
+        # Get the pod name
+        pod_name = get_pod_name(user_id, project_id)
+        
+        print(f"🔧 Executing git clone on pod {pod_name}")
+        print(f"📦 Repository: {repo_url}")
+        
+        # Build the clone command
+        clone_script = f'''
+set -e
+echo "🔧 Starting repository clone..."
+echo "📦 Repository URL: {repo_url}"
+REPO_PATH=$(echo "{repo_url}" | sed 's|https://github.com/||' | sed 's|.git$||')
+AUTHENTICATED_URL="https://${{GITHUB_PERSONAL_ACCESS_TOKEN}}@github.com/${{REPO_PATH}}.git"
+echo "🌐 Formulated authenticated URL..."
+git clone "$AUTHENTICATED_URL"
+echo "🎉 Repository clone completed successfully!"
+'''
+
+        # Execute the command on the pod
+        exec_command = ['/bin/sh', '-c', clone_script]
+        
+        resp = stream(
+            core_v1.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            command=exec_command,
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False
+        )
+        
+        print(f"📄 Clone command output:")
+        print(resp)
+        
+        # Check if the command succeeded (basic check)
+        if "✅" in resp and "completed successfully" in resp:
+            print(f"✅ Git clone executed successfully on pod {pod_name}")
+            return True
+        else:
+            print(f"❌ Git clone may have failed. Output: {resp}")
+            raise Exception(f"Git clone command failed: {resp}")
+            
+    except ApiException as e:
+        print(f"✗ Failed to execute git clone: {e}")
+        raise e
+    except Exception as e:
+        print(f"✗ Unexpected error during git clone: {e}")
+        raise e
+
+
+async def clone_repository_on_pod(user_id: str, project_id: str, repo_url: str):
+    """
+    Wait for pod health, then execute git clone command.
+    """
+    try:
+        # Step 1: Wait for pod to be healthy
+        print(f"🏥 Waiting for pod health check...")
+        endpoint = await wait_for_pod_health(user_id, project_id)
+        
+        # Step 2: Execute git clone command
+        print(f"📂 Executing git clone command...")
+        execute_git_clone(user_id, project_id, repo_url)
+        
+        print(f"🎉 Repository {repo_url} successfully cloned to project {project_id}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to clone repository: {e}")
         raise e
 
 
@@ -527,7 +677,7 @@ def update_github_secret(user_id: str, project_id: str, github_key: str = None):
 
             # Update secret data
             secret_data = {
-                "GITHUB_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
+                "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
                     "utf-8"
                 )
             }
@@ -544,7 +694,7 @@ def update_github_secret(user_id: str, project_id: str, github_key: str = None):
             if e.status == 404:
                 # Secret doesn't exist, create it
                 secret_data = {
-                    "GITHUB_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
                         "utf-8"
                     )
                 }
@@ -644,7 +794,7 @@ def create_or_update_user_github_secret(user_id: str, github_key: str):
 
             # Update secret data
             secret_data = {
-                "GITHUB_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
+                "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
                     "utf-8"
                 )
             }
@@ -661,7 +811,7 @@ def create_or_update_user_github_secret(user_id: str, github_key: str):
             if e.status == 404:
                 # Secret doesn't exist, create it
                 secret_data = {
-                    "GITHUB_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
+                    "GITHUB_PERSONAL_ACCESS_TOKEN": base64.b64encode(github_key.encode("utf-8")).decode(
                         "utf-8"
                     )
                 }

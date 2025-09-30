@@ -1,6 +1,7 @@
 # Original main.py file - kept for local development
 # For Vercel deployment, see api/index.py
 
+import os
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -8,6 +9,9 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi_mcp import FastApiMCP
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from routes import project_routes
 
@@ -69,4 +73,5 @@ mcp = FastApiMCP(
 mcp.mount_http()
 
 if __name__ == "__main__":
+    print(f"Running DEV MODE: {os.getenv('DEV_ENV') == '1'}")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
