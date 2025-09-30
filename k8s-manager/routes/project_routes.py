@@ -150,25 +150,17 @@ async def create_project(user_id: str, project: ProjectCreate):
     try:
         k8s_service.apply_project_resources(user_id, project_id, github_key, user_secret_exists)
 
-        # Wait for pod to be ready - simple approach for POC
-        await k8s_service.wait_for_pod_health(user_id, project_id)
+        # Wait for LoadBalancer IP assignment first
+        endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
 
-        # Get LoadBalancer IP/hostname
-        try:
-            endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-        except Exception as e:
-            # If LoadBalancer IP is not ready, scale back down and fail
-            k8s_service.scale_project(user_id, project_id, 0)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to get project endpoint: {str(e)}. LoadBalancer IP may not be ready yet.",
-            )
+        # Then wait for pod to be healthy
+        await k8s_service.wait_for_pod_health(user_id, project_id, endpoint)
 
         # If repository URL is provided, clone it after pod is healthy
         if project.repo_url:
             try:
                 print(f"📂 Cloning repository: {project.repo_url}")
-                await k8s_service.clone_repository_on_pod(user_id, project_id, project.repo_url)
+                await k8s_service.clone_repository_on_pod(user_id, project_id, project.repo_url, endpoint)
                 print(f"✅ Repository cloned successfully")
             except Exception as e:
                 print(f"❌ Repository cloning failed: {e}")
@@ -294,26 +286,18 @@ async def activate_project(user_id: str, project_id: str):
         # Scale up deployment
         k8s_service.scale_project(user_id, project_id, 1)
 
-        # Wait for pod to be ready - simple approach for POC
-        await k8s_service.wait_for_pod_health(user_id, project_id)
+        # Wait for LoadBalancer IP assignment first
+        endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
 
-        # Get LoadBalancer IP/hostname
-        try:
-            endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-        except Exception as e:
-            # If LoadBalancer IP is not ready, scale back down and fail
-            k8s_service.scale_project(user_id, project_id, 0)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to get project endpoint: {str(e)}. LoadBalancer IP may not be ready yet.",
-            )
+        # Then wait for pod to be healthy
+        await k8s_service.wait_for_pod_health(user_id, project_id, endpoint)
 
         # If repository URL is provided, clone it after pod is healthy
         repo_url = project.get("repo_url")
         if repo_url:
             try:
                 print(f"📂 Cloning repository on activation: {repo_url}")
-                await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url)
+                await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url, endpoint)
                 print(f"✅ Repository cloned successfully")
             except Exception as e:
                 print(f"❌ Repository cloning failed: {e}")
@@ -355,8 +339,13 @@ async def clone_repository(user_id: str, project_id: str):
         if not repo_url:
             raise HTTPException(status_code=400, detail="No repository URL configured for this project")
 
+        # Get the project endpoint
+        endpoint = k8s_service.get_project_endpoint(user_id, project_id)
+        if not endpoint:
+            raise HTTPException(status_code=500, detail="Project endpoint not available")
+
         # Clone the repository
-        await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url)
+        await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url, endpoint)
 
         return {"message": f"Repository {repo_url} cloned successfully"}
 
