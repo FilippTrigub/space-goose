@@ -5,6 +5,7 @@ from datetime import datetime
 class ProjectCreate(BaseModel):
     name: str
     github_key: Optional[str] = None
+    repo_url: Optional[str] = None
 
 class ProjectUpdate(BaseModel):
     name: str
@@ -25,6 +26,8 @@ class Project(BaseModel):
     status: str  # active, inactive
     endpoint: Optional[str] = None
     github_key_set: Optional[bool] = False
+    repo_url: Optional[str] = None
+    has_repository: Optional[bool] = False
     sessions: Optional[List[Session]] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
