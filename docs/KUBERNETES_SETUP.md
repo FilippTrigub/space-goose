@@ -96,7 +96,7 @@ kubectl create role testuser-ops -n testuser --verb=get,list,watch,create,update
 kubectl create rolebinding testuser-ops-binding -n testuser --role=testuser-ops --serviceaccount=testuser:testuser-bot
 
 # 4b. Load environment variables from a .env file (use a Secret instead of ConfigMap for sensitive values)
-kubectl create configmap testuser-env --from-env-file=project.env -n testuser
+kubectl create configmap testuser-env --from-env-file=.env -n testuser
 
 # 5. Deploy the container image with environment variables
 #    (restricted PodSecurity profile requires non-root run, dropped capabilities,

@@ -1,4 +1,5 @@
 import os
+import re
 import base64
 import tempfile
 import time
@@ -9,9 +10,19 @@ from kubernetes.client.rest import ApiException
 from kubernetes.config.config_exception import ConfigException
 from kubernetes.stream import stream
 
+from models import PodNotFoundException
+
 ACR_IMAGE = os.getenv("ACR_IMAGE")
 KUBE_CONFIG = os.getenv("KUBECONFIG")
 KUBE_CONFIG_BASE64 = os.getenv("KUBECONFIG_BASE64")
+PUBLIC_APP_DOMAIN = os.getenv("PUBLIC_APP_DOMAIN")
+INGRESS_CLASS_NAME = os.getenv("INGRESS_CLASS_NAME", "nginx")
+INGRESS_TLS_SECRET_PATTERN = os.getenv("INGRESS_TLS_SECRET_PATTERN")
+
+if not PUBLIC_APP_DOMAIN:
+    raise Exception(
+        "PUBLIC_APP_DOMAIN environment variable must be set to issue ingress hostnames"
+    )
 
 
 def load_k8s_config():
@@ -146,7 +157,23 @@ def ensure_namespace(user_id: str):
     return namespace
 
 
-def apply_project_resources(
+def _slugify_segment(value: str) -> str:
+    """Turn arbitrary identifiers into DNS-safe lowercase segments."""
+    if not value:
+        return "app"
+    cleaned = re.sub(r"[^a-z0-9-]", "-", value.lower())
+    collapsed = re.sub(r"-+", "-", cleaned).strip("-")
+    return collapsed or "app"
+
+
+def build_project_host(user_id: str, project_id: str) -> str:
+    """Construct the external DNS host for a project ingress."""
+    user_segment = _slugify_segment(user_id)
+    project_segment = _slugify_segment(project_id)
+    return f"{project_segment}-{user_segment}.{PUBLIC_APP_DOMAIN}"
+
+
+async def apply_project_resources(
     user_id: str,
     project_id: str,
     github_key: str = None,
@@ -162,8 +189,8 @@ def apply_project_resources(
     config_map_name = f"{user_id}-env"
     config_map_exists = False
 
-    source_namespace = "testuser"
-    source_config_name = "testuser-env"
+    source_namespace = "goose-api-env"
+    source_config_name = "goose-api-env"
     try:
         source_config = core_v1.read_namespaced_config_map(
             name=source_config_name, namespace=source_namespace
@@ -264,58 +291,42 @@ def apply_project_resources(
                 client.V1EnvVar(name="USER_ID", value=user_id),
                 client.V1EnvVar(name="PROJECT_ID", value=project_id),
             ],
-            
             # Readiness probe - determines when pod can receive traffic
             readiness_probe=client.V1Probe(
                 http_get=client.V1HTTPGetAction(
-                    path="/api/v1/health",
-                    port=3001,
-                    scheme="HTTP"
+                    path="/api/v1/health", port=3001, scheme="HTTP"
                 ),
                 initial_delay_seconds=10,
                 period_seconds=5,
                 timeout_seconds=3,
                 success_threshold=1,
-                failure_threshold=3
+                failure_threshold=3,
             ),
-            
             # Liveness probe - determines when to restart container
             liveness_probe=client.V1Probe(
                 http_get=client.V1HTTPGetAction(
-                    path="/api/v1/health", 
-                    port=3001,
-                    scheme="HTTP"
+                    path="/api/v1/health", port=3001, scheme="HTTP"
                 ),
                 initial_delay_seconds=30,
                 period_seconds=10,
                 timeout_seconds=5,
-                failure_threshold=3
+                failure_threshold=3,
             ),
-            
             # Startup probe - gives extra time for slow-starting containers
             startup_probe=client.V1Probe(
                 http_get=client.V1HTTPGetAction(
-                    path="/api/v1/health",
-                    port=3001,
-                    scheme="HTTP"  
+                    path="/api/v1/health", port=3001, scheme="HTTP"
                 ),
                 initial_delay_seconds=5,
                 period_seconds=5,
                 timeout_seconds=3,
-                failure_threshold=12  # 60 seconds total
+                failure_threshold=12,  # 60 seconds total
             ),
-            
             # Resource limits for better startup performance
             resources=client.V1ResourceRequirements(
-                requests={
-                    "memory": "1024Mi",
-                    "cpu": "1000m"
-                },
-                limits={
-                    "memory": "2048Mi", 
-                    "cpu": "2000m"
-                }
-            )
+                requests={"memory": "1024Mi", "cpu": "1000m"},
+                limits={"memory": "2048Mi", "cpu": "2000m"},
+            ),
         )
 
         # Add ConfigMap environment variables if available
@@ -376,7 +387,9 @@ def apply_project_resources(
             else:
                 raise e
 
-        # Create Service with LoadBalancer type and health check annotations
+        # Create Service exposed internally; ingress will publish it externally
+        await asyncio.sleep(5)
+        await asyncio.sleep(5)
         service = client.V1Service(
             metadata=client.V1ObjectMeta(
                 name=service_name,
@@ -387,13 +400,6 @@ def apply_project_resources(
                     "user-id": user_id,
                     "managed-by": "k8s-manager",
                 },
-                annotations={
-                    # Cloud provider health check configurations
-                    "service.beta.kubernetes.io/aws-load-balancer-healthcheck-path": "/api/v1/health",
-                    "service.beta.kubernetes.io/aws-load-balancer-healthcheck-port": "3001",
-                    "service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol": "HTTP",
-                    "service.beta.kubernetes.io/azure-load-balancer-health-probe-path": "/api/v1/health",
-                }
             ),
             spec=client.V1ServiceSpec(
                 selector={"app": deployment_name},
@@ -402,16 +408,80 @@ def apply_project_resources(
                         port=80, target_port=3001, protocol="TCP", name="http"
                     )
                 ],
-                type="LoadBalancer",
+                type="ClusterIP",
             ),
         )
 
         try:
             core_v1.create_namespaced_service(namespace=namespace, body=service)
-            print(f"✓ Created service: {service_name} with health check annotations")
+            print(f"✓ Created ClusterIP service: {service_name}")
         except ApiException as e:
             if e.status == 409:  # Already exists
                 print(f"ℹ Service {service_name} already exists")
+            else:
+                raise e
+
+        # Create or update ingress record pointing to the shared controller
+        host = build_project_host(user_id, project_id)
+        backend = client.V1IngressBackend(
+            service=client.V1IngressServiceBackend(
+                name=service_name,
+                port=client.V1ServiceBackendPort(number=80),
+            )
+        )
+        ingress_path = client.V1HTTPIngressPath(
+            path="/",
+            path_type="Prefix",
+            backend=backend,
+        )
+        ingress_rule = client.V1IngressRule(
+            host=host,
+            http=client.V1HTTPIngressRuleValue(paths=[ingress_path]),
+        )
+
+        tls_entries = None
+        if INGRESS_TLS_SECRET_PATTERN:
+            try:
+                tls_secret_name = INGRESS_TLS_SECRET_PATTERN.format(
+                    user_id=user_id, project_id=project_id
+                )
+            except KeyError as key_err:
+                raise Exception(
+                    f"INGRESS_TLS_SECRET_PATTERN has unknown placeholder: {key_err}"
+                )
+            tls_entries = [
+                client.V1IngressTLS(hosts=[host], secret_name=tls_secret_name)
+            ]
+
+        ingress_spec = client.V1IngressSpec(
+            ingress_class_name=INGRESS_CLASS_NAME,
+            rules=[ingress_rule],
+            tls=tls_entries,
+        )
+
+        ingress = client.V1Ingress(
+            metadata=client.V1ObjectMeta(
+                name=service_name,
+                namespace=namespace,
+                labels={
+                    "app": deployment_name,
+                    "project-id": project_id,
+                    "user-id": user_id,
+                    "managed-by": "k8s-manager",
+                },
+            ),
+            spec=ingress_spec,
+        )
+
+        try:
+            networking_v1.create_namespaced_ingress(namespace=namespace, body=ingress)
+            print(f"✓ Created ingress: {service_name} → {host}")
+        except ApiException as e:
+            if e.status == 409:
+                networking_v1.replace_namespaced_ingress(
+                    name=service_name, namespace=namespace, body=ingress
+                )
+                print(f"ℹ Updated existing ingress: {service_name} → {host}")
             else:
                 raise e
 
@@ -424,53 +494,55 @@ async def wait_for_loadbalancer_ip(
     user_id: str, project_id: str, timeout_seconds: int = 120
 ):
     """
-    Wait specifically for LoadBalancer IP assignment.
-    Separate from pod health - this is infrastructure-level waiting.
+    Wait for shared ingress to publish the project host via the controller's static IP.
+    Returns the project host once the ingress reports a ready load balancer.
     """
     namespace = f"user-{user_id}"
-    service_name = f"proj-{project_id}-api"
+    ingress_name = f"proj-{project_id}-api"
     start_time = time.time()
 
-    print(f"⏳ Waiting for LoadBalancer IP assignment for {service_name}...")
+    host = build_project_host(user_id, project_id)
+    print(f"⏳ Waiting for ingress readiness for {ingress_name} ({host})...")
 
     while time.time() - start_time < timeout_seconds:
         try:
-            service = core_v1.read_namespaced_service(
-                name=service_name, namespace=namespace
+            ingress = networking_v1.read_namespaced_ingress(
+                name=ingress_name, namespace=namespace
             )
 
-            # Check if LoadBalancer has been assigned
+            status = ingress.status
             if (
-                service.status
-                and service.status.load_balancer
-                and service.status.load_balancer.ingress
-                and len(service.status.load_balancer.ingress) > 0
+                status
+                and status.load_balancer
+                and status.load_balancer.ingress
+                and len(status.load_balancer.ingress) > 0
             ):
-
-                ingress = service.status.load_balancer.ingress[0]
-                if ingress.ip:
-                    print(f"✅ LoadBalancer IP assigned: {ingress.ip}")
-                    return ingress.ip
-                elif ingress.hostname:
-                    print(f"✅ LoadBalancer hostname assigned: {ingress.hostname}")
-                    return ingress.hostname
+                lb_record = status.load_balancer.ingress[0]
+                identifier = lb_record.ip or lb_record.hostname
+                if identifier:
+                    print(
+                        f"✅ Ingress {ingress_name} published via load balancer {identifier}"
+                    )
+                    return host
 
         except ApiException as e:
             if e.status == 404:
-                print(f"⏳ Service {service_name} not found, waiting...")
+                print(f"⏳ Ingress {ingress_name} not found, waiting...")
             else:
-                print(f"⏳ Error checking service: {e}")
+                print(f"⏳ Error checking ingress: {e}")
 
         elapsed = int(time.time() - start_time)
-        print(f"⏳ LoadBalancer IP not ready yet, waiting... ({elapsed}s elapsed)")
-        await asyncio.sleep(3)  # Check every 10 seconds for infrastructure
+        print(f"⏳ Ingress not ready yet, waiting... ({elapsed}s elapsed)")
+        await asyncio.sleep(3)
 
     raise Exception(
-        f"LoadBalancer IP assignment timed out after {timeout_seconds} seconds"
+        f"Ingress readiness timed out after {timeout_seconds} seconds"
     )
 
 
-async def wait_for_pod_readiness(user_id: str, project_id: str, timeout_seconds: int = 300):
+async def wait_for_pod_readiness(
+    user_id: str, project_id: str, timeout_seconds: int = 300
+):
     """
     Wait for pod to be truly ready according to Kubernetes readiness checks.
     This ensures the pod passes its readiness probe before we try to connect.
@@ -478,49 +550,58 @@ async def wait_for_pod_readiness(user_id: str, project_id: str, timeout_seconds:
     namespace = f"user-{user_id}"
     deployment_name = f"proj-{project_id}-api"
     start_time = time.time()
-    
+
     print(f"⏳ Waiting for pod readiness for {deployment_name}...")
-    
+
     while time.time() - start_time < timeout_seconds:
         try:
             # Get deployment status
             deployment = apps_v1.read_namespaced_deployment(
                 name=deployment_name, namespace=namespace
             )
-            
+
             # Check if deployment has ready replicas
-            if (deployment.status.ready_replicas and 
-                deployment.status.ready_replicas >= 1):
+            if (
+                deployment.status.ready_replicas
+                and deployment.status.ready_replicas >= 1
+            ):
                 print("✅ Pod is ready according to Kubernetes readiness checks")
                 return True
-                
+
+            print(f"Pod deployment ready_replicas: {deployment.status.ready_replicas}")
+
             # Also check individual pod readiness
             pods = core_v1.list_namespaced_pod(
-                namespace=namespace,
-                label_selector=f"app={deployment_name}"
+                namespace=namespace, label_selector=f"app={deployment_name}"
             )
-            
+
             for pod in pods.items:
                 if pod.status.phase == "Running":
                     # Check readiness conditions
                     if pod.status.conditions:
                         ready_condition = next(
-                            (c for c in pod.status.conditions if c.type == "Ready"), 
-                            None
+                            (c for c in pod.status.conditions if c.type == "Ready"),
+                            None,
                         )
                         if ready_condition and ready_condition.status == "True":
                             print(f"✅ Pod {pod.metadata.name} is ready")
                             return True
-            
+                        else:
+                            print(f"ready_condition: {ready_condition}")
+                else:
+                    print(f"pod.status: {pod.status}")
+
             elapsed = int(time.time() - start_time)
             print(f"⏳ Pod not ready yet, waiting... ({elapsed}s elapsed)")
             await asyncio.sleep(3)
-            
+
         except Exception as e:
             elapsed = int(time.time() - start_time)
-            print(f"⏳ Error checking pod readiness: {e}, retrying... ({elapsed}s elapsed)")
+            print(
+                f"⏳ Error checking pod readiness: {e}, retrying... ({elapsed}s elapsed)"
+            )
             await asyncio.sleep(3)
-    
+
     raise Exception(f"Pod readiness check timed out after {timeout_seconds} seconds")
 
 
@@ -556,13 +637,16 @@ async def wait_for_pod_health(
 
         except Exception as e:
             elapsed = int(time.time() - start_time)
-            print(f"⏳ Health check failed: {e.__class__.__name__}, retrying... ({elapsed}s elapsed)")
+            print(
+                f"⏳ Health check failed: {e.__class__.__name__}, endpoint: {endpoint}; retrying... ({elapsed}s elapsed)"
+            )
 
     raise Exception(f"Pod health check timed out after {timeout_seconds} seconds")
 
 
 # Rest of the functions remain unchanged for brevity...
 # [Including all other existing functions from the original file]
+
 
 def get_pod_name(user_id: str, project_id: str):
     """
@@ -698,7 +782,7 @@ def scale_project(user_id: str, project_id: str, replicas: int):
 
     except ApiException as e:
         if e.status == 404:
-            raise Exception(
+            raise PodNotFoundException(
                 f"Deployment {deployment_name} not found in namespace {namespace}"
             )
         else:
@@ -711,35 +795,33 @@ def scale_project(user_id: str, project_id: str, replicas: int):
 
 def get_project_endpoint(user_id: str, project_id: str):
     """
-    Get the LoadBalancer IP for a project service.
-    This now assumes the endpoint exists (for use after creation).
+    Get the externally routable hostname for a project's ingress.
+    Returns None if the ingress has not finished publishing through the shared load balancer.
     Returns None if not available instead of throwing exceptions.
     """
     if os.getenv("DEV_ENV") == "1":
         return "localhost:3001"
 
     namespace = f"user-{user_id}"
-    service_name = f"proj-{project_id}-api"
+    ingress_name = f"proj-{project_id}-api"
+    host = build_project_host(user_id, project_id)
 
     try:
-        service = core_v1.read_namespaced_service(
-            name=service_name, namespace=namespace
+        ingress = networking_v1.read_namespaced_ingress(
+            name=ingress_name, namespace=namespace
         )
 
         if (
-            service.status
-            and service.status.load_balancer
-            and service.status.load_balancer.ingress
-            and len(service.status.load_balancer.ingress) > 0
+            ingress.status
+            and ingress.status.load_balancer
+            and ingress.status.load_balancer.ingress
+            and len(ingress.status.load_balancer.ingress) > 0
         ):
-
-            ingress = service.status.load_balancer.ingress[0]
-            if ingress.ip:
-                print(f"✓ Found LoadBalancer IP: {ingress.ip}")
-                return ingress.ip
-            elif ingress.hostname:
-                print(f"✓ Found LoadBalancer hostname: {ingress.hostname}")
-                return ingress.hostname
+            lb_record = ingress.status.load_balancer.ingress[0]
+            identifier = lb_record.ip or lb_record.hostname
+            if identifier:
+                print(f"✓ Ingress {ingress_name} published via {identifier}")
+                return host
 
         # For existing projects, return None instead of throwing
         return None
@@ -748,10 +830,10 @@ def get_project_endpoint(user_id: str, project_id: str):
         if e.status == 404:
             return None
         else:
-            print(f"✗ Failed to get service {service_name}: {e}")
+            print(f"✗ Failed to get ingress {ingress_name}: {e}")
             raise e
     except Exception as e:
-        print(f"✗ Unexpected error getting LoadBalancer IP: {e}")
+        print(f"✗ Unexpected error getting ingress hostname: {e}")
         raise e
 
 
@@ -765,6 +847,26 @@ def delete_project_resources(user_id: str, project_id: str):
     github_secret_name = f"proj-{project_id}-github-key"
 
     errors = []
+
+    # Delete ingress
+    try:
+        networking_v1.delete_namespaced_ingress(
+            name=service_name,
+            namespace=namespace,
+            body=client.V1DeleteOptions(grace_period_seconds=10),
+        )
+        print(f"✓ Deleted ingress: {service_name}")
+    except ApiException as e:
+        if e.status == 404:
+            print(f"ℹ Ingress {service_name} was already deleted")
+        else:
+            error_msg = f"Failed to delete ingress {service_name}: {e}"
+            print(f"✗ {error_msg}")
+            errors.append(error_msg)
+    except Exception as e:
+        error_msg = f"Unexpected error deleting ingress {service_name}: {e}"
+        print(f"✗ {error_msg}")
+        errors.append(error_msg)
 
     # Delete deployment
     try:

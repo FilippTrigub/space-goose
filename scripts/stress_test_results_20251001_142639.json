@@ -1,0 +1,277 @@
+{
+  "config": {
+    "host": "https://space-goose-app.blackhill-13aa394c.francecentral.azurecontainerapps.io",
+    "user_id": "user1",
+    "project_name": "Stress Test Project",
+    "session_name": "Stress Test Session",
+    "num_messages": 25,
+    "timeout": 120,
+    "delay_between_messages": 1.0,
+    "max_retries": 3,
+    "cleanup_after_test": true
+  },
+  "start_time": "2025-10-01T14:11:51.849666",
+  "end_time": "2025-10-01T14:26:39.704585",
+  "total_duration": 887.854919,
+  "project_id": "68dd1a8685f488e6c722ae5e",
+  "session_id": "4674de80-3daf-4d72-b041-99f793fef6e6",
+  "individual_results": [
+    {
+      "message_num": 1,
+      "question": "Hello, can you help me with Python programming?",
+      "success": true,
+      "response_time": 5.08025598526001,
+      "stream_chunks": 17,
+      "total_response_size": 3092,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 2,
+      "question": "What is the difference between a list and a tuple in Python?",
+      "success": true,
+      "response_time": 9.713731288909912,
+      "stream_chunks": 332,
+      "total_response_size": 61068,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 3,
+      "question": "How do I handle exceptions in Python?",
+      "success": true,
+      "response_time": 13.581486463546753,
+      "stream_chunks": 526,
+      "total_response_size": 97819,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 4,
+      "question": "Can you explain what a decorator is?",
+      "success": true,
+      "response_time": 14.98193907737732,
+      "stream_chunks": 587,
+      "total_response_size": 108402,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 5,
+      "question": "What is the difference between __str__ and __repr__?",
+      "success": true,
+      "response_time": 20.00381112098694,
+      "stream_chunks": 740,
+      "total_response_size": 135604,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 6,
+      "question": "How do I create a virtual environment?",
+      "success": true,
+      "response_time": 16.15740656852722,
+      "stream_chunks": 467,
+      "total_response_size": 86419,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 7,
+      "question": "What is the purpose of the __init__.py file?",
+      "success": true,
+      "response_time": 15.859527826309204,
+      "stream_chunks": 458,
+      "total_response_size": 84951,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 8,
+      "question": "How do I use list comprehensions?",
+      "success": true,
+      "response_time": 28.44783902168274,
+      "stream_chunks": 666,
+      "total_response_size": 122068,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 9,
+      "question": "What is the difference between deep copy and shallow copy?",
+      "success": true,
+      "response_time": 21.304763793945312,
+      "stream_chunks": 745,
+      "total_response_size": 136639,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 10,
+      "question": "How do I work with JSON data in Python?",
+      "success": true,
+      "response_time": 44.835893630981445,
+      "stream_chunks": 677,
+      "total_response_size": 125002,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 11,
+      "question": "What is a lambda function and when should I use it?",
+      "success": true,
+      "response_time": 22.994662523269653,
+      "stream_chunks": 458,
+      "total_response_size": 85082,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 12,
+      "question": "How do I handle file I/O operations?",
+      "success": true,
+      "response_time": 45.237327337265015,
+      "stream_chunks": 687,
+      "total_response_size": 126882,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 13,
+      "question": "What is the difference between synchronous and asynchronous programming?",
+      "success": true,
+      "response_time": 52.46842122077942,
+      "stream_chunks": 531,
+      "total_response_size": 104414,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 14,
+      "question": "How do I use the requests library?",
+      "success": true,
+      "response_time": 53.5259952545166,
+      "stream_chunks": 519,
+      "total_response_size": 102012,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 15,
+      "question": "What are context managers and how do I use them?",
+      "success": true,
+      "response_time": 58.11300492286682,
+      "stream_chunks": 824,
+      "total_response_size": 154490,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 16,
+      "question": "How do I debug Python code effectively?",
+      "success": true,
+      "response_time": 61.866615772247314,
+      "stream_chunks": 730,
+      "total_response_size": 141061,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 17,
+      "question": "What is the difference between a class method and a static method?",
+      "success": true,
+      "response_time": 15.446412563323975,
+      "stream_chunks": 439,
+      "total_response_size": 81906,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 18,
+      "question": "How do I work with dates and times in Python?",
+      "success": true,
+      "response_time": 39.675267696380615,
+      "stream_chunks": 1351,
+      "total_response_size": 246502,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 19,
+      "question": "What are generators and how do they work?",
+      "success": true,
+      "response_time": 50.44247388839722,
+      "stream_chunks": 780,
+      "total_response_size": 145035,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 20,
+      "question": "How do I use regular expressions in Python?",
+      "success": true,
+      "response_time": 29.67703342437744,
+      "stream_chunks": 707,
+      "total_response_size": 131129,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 21,
+      "question": "Hello, can you help me with Python programming?",
+      "success": true,
+      "response_time": 47.04393029212952,
+      "stream_chunks": 146,
+      "total_response_size": 26770,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 22,
+      "question": "What is the difference between a list and a tuple in Python?",
+      "success": true,
+      "response_time": 31.442002058029175,
+      "stream_chunks": 645,
+      "total_response_size": 117838,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 23,
+      "question": "How do I handle exceptions in Python?",
+      "success": true,
+      "response_time": 39.962844371795654,
+      "stream_chunks": 1102,
+      "total_response_size": 201910,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 24,
+      "question": "Can you explain what a decorator is?",
+      "success": true,
+      "response_time": 33.77595376968384,
+      "stream_chunks": 1004,
+      "total_response_size": 184024,
+      "error_message": null,
+      "status_code": 200
+    },
+    {
+      "message_num": 25,
+      "question": "What is the difference between __str__ and __repr__?",
+      "success": true,
+      "response_time": 23.016624927520752,
+      "stream_chunks": 743,
+      "total_response_size": 136153,
+      "error_message": null,
+      "status_code": 200
+    }
+  ],
+  "success_rate": 100.0,
+  "avg_response_time": 31.786208992004394,
+  "min_response_time": 5.08025598526001,
+  "max_response_time": 61.866615772247314,
+  "total_chunks_received": 15881,
+  "total_response_size": 2946272,
+  "errors": []
+}

@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime
 
 from models import (
+    PodNotFoundException,
     ProjectCreate,
     ProjectUpdate,
     Project,
@@ -150,7 +151,7 @@ async def create_project(user_id: str, project: ProjectCreate):
 
     # Create K8s resources and activate
     try:
-        k8s_service.apply_project_resources(user_id, project_id, github_key, user_secret_exists)
+        await k8s_service.apply_project_resources(user_id, project_id, github_key, user_secret_exists)
 
         # Wait for LoadBalancer IP assignment first
         endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
@@ -243,8 +244,12 @@ async def delete_project(user_id: str, project_id: str):
     # First deactivate if active
     project = mongodb_service.get_project(project_id)
     if project and project["status"] == "active":
-        k8s_service.scale_project(user_id, project_id, 0)
-
+        try:
+            k8s_service.scale_project(user_id, project_id, 0)
+        except PodNotFoundException:
+            mongodb_service.delete_project(project_id)
+            return {"message": "Project deleted successfully"}
+            
     # Delete K8s resources
     k8s_service.delete_project_resources(user_id, project_id)
 

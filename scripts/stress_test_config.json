@@ -1,0 +1,12 @@
+{
+  "host": "localhost",
+  "port": 8000,
+  "user_id": "user1",
+  "project_name": "Stress Test Project - Light Load",
+  "session_name": "Light Load Test Session",
+  "num_messages": 5,
+  "timeout": 30,
+  "delay_between_messages": 2.0,
+  "max_retries": 2,
+  "cleanup_after_test": true
+}

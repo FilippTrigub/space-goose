@@ -1,0 +1,13 @@
+{
+  "host": "localhost",
+  "port": 8000,
+  "user_id": "user1",
+  "project_name": "High Concurrency Test",
+  "num_sessions": 10,
+  "messages_per_session": 5,
+  "timeout": 90,
+  "stagger_session_creation": 0.3,
+  "stagger_message_sending": 0.1,
+  "max_retries": 3,
+  "cleanup_after_test": true
+}

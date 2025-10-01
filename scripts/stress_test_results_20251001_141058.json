@@ -1,0 +1,37 @@
+{
+  "config": {
+    "host": "https://space-goose-app.blackhill-13aa394c.francecentral.azurecontainerapps.io",
+    "user_id": "user1",
+    "project_name": "Stress Test Project",
+    "session_name": "Stress Test Session",
+    "num_messages": 1,
+    "timeout": 120,
+    "delay_between_messages": 1.0,
+    "max_retries": 3,
+    "cleanup_after_test": true
+  },
+  "start_time": "2025-10-01T14:09:33.013562",
+  "end_time": "2025-10-01T14:10:58.763817",
+  "total_duration": 85.750255,
+  "project_id": "68dd19fb85f488e6c722ae5d",
+  "session_id": "32a994c0-365c-46c6-b601-c8d6f1c68482",
+  "individual_results": [
+    {
+      "message_num": 1,
+      "question": "Hello, can you help me with Python programming?",
+      "success": true,
+      "response_time": 11.516331195831299,
+      "stream_chunks": 167,
+      "total_response_size": 30668,
+      "error_message": null,
+      "status_code": 200
+    }
+  ],
+  "success_rate": 100.0,
+  "avg_response_time": 11.516331195831299,
+  "min_response_time": 11.516331195831299,
+  "max_response_time": 11.516331195831299,
+  "total_chunks_received": 167,
+  "total_response_size": 30668,
+  "errors": []
+}

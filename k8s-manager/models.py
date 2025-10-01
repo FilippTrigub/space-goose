@@ -81,3 +81,6 @@ class MessageRequest(BaseModel):
 
 class SettingUpdate(BaseModel):
     value: Any  # Can be string, number, or boolean
+    
+class PodNotFoundException(Exception):
+    pass
