@@ -189,7 +189,7 @@ async def apply_project_resources(
     config_map_name = f"{user_id}-env"
     config_map_exists = False
 
-    source_namespace = "goose-api-env"
+    source_namespace = "goose-api-main"
     source_config_name = "goose-api-env"
     try:
         source_config = core_v1.read_namespaced_config_map(

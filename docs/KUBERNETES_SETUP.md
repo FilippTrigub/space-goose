@@ -43,15 +43,15 @@
 ## Command Recipes
 ```sh
 # 1. Create namespace for the user project
-kubectl create namespace testuser
+kubectl create namespace goose-api-main
 
 # 2. Apply resource quota and limits
 (
 echo apiVersion: v1
 echo kind: ResourceQuota
 echo metadata:
-echo ^  name: testuser-quota
-echo ^  namespace: testuser
+echo ^  name: goose-api-main-quota
+echo ^  namespace: goose-api-main
 echo spec:
 echo ^  hard:
 echo ^    requests.cpu: '2'
@@ -65,17 +65,17 @@ kubectl apply -f quota.yaml
 
 
 # 3. Enforce Pod Security baseline + NetworkPolicy
-kubectl label namespace testuser pod-security.kubernetes.io/enforce=restricted
+kubectl label namespace goose-api-main pod-security.kubernetes.io/enforce=restricted
 (
 echo apiVersion: networking.k8s.io/v1
 echo kind: NetworkPolicy
 echo metadata:
 echo ^  name: allow-platform-gateway
-echo ^  namespace: testuser
+echo ^  namespace: goose-api-main
 echo spec:
 echo ^  podSelector:
 echo ^    matchLabels:
-echo ^      app: testuser-api
+echo ^      app: goose-api-main-api
 echo ^  policyTypes:
 echo ^  - Ingress
 echo ^  ingress:
@@ -86,17 +86,17 @@ echo ^          role: platform-gateway
 echo ^    ports:
 echo ^    - protocol: TCP
 echo ^      port: 3001
-) > testuser-networkpolicy.yaml
+) > goose-api-main-networkpolicy.yaml
 
-kubectl apply -f testuser-networkpolicy.yaml
+kubectl apply -f goose-api-main-networkpolicy.yaml
 
 # 4. Create service account and RBAC binding
-kubectl create serviceaccount testuser-bot -n testuser
-kubectl create role testuser-ops -n testuser --verb=get,list,watch,create,update,delete --resource=deployments,statefulsets,services,ingresses,configmaps,secrets,pods
-kubectl create rolebinding testuser-ops-binding -n testuser --role=testuser-ops --serviceaccount=testuser:testuser-bot
+kubectl create serviceaccount goose-api-main-bot -n goose-api-main
+kubectl create role goose-api-main-ops -n goose-api-main --verb=get,list,watch,create,update,delete --resource=deployments,statefulsets,services,ingresses,configmaps,secrets,pods
+kubectl create rolebinding goose-api-main-ops-binding -n goose-api-main --role=goose-api-main-ops --serviceaccount=goose-api-main:goose-api-main-bot
 
 # 4b. Load environment variables from a .env file (use a Secret instead of ConfigMap for sensitive values)
-kubectl create configmap testuser-env --from-env-file=.env -n testuser
+kubectl create configmap goose-api-main-env --from-env-file=.env -n goose-api-main
 
 # 5. Deploy the container image with environment variables
 #    (restricted PodSecurity profile requires non-root run, dropped capabilities,
@@ -108,19 +108,19 @@ kubectl create configmap testuser-env --from-env-file=.env -n testuser
 echo apiVersion: apps/v1
 echo kind: Deployment
 echo metadata:
-echo ^  name: testuser-api
-echo ^  namespace: testuser
+echo ^  name: goose-api-main-api
+echo ^  namespace: goose-api-main
 echo spec:
 echo ^  replicas: 0
 echo ^  selector:
 echo ^    matchLabels:
-echo ^      app: testuser-api
+echo ^      app: goose-api-main-api
 echo ^  template:
 echo ^    metadata:
 echo ^      labels:
-echo ^        app: testuser-api
+echo ^        app: goose-api-main-api
 echo ^    spec:
-echo ^      serviceAccountName: testuser-bot
+echo ^      serviceAccountName: goose-api-main-bot
 echo ^      securityContext:
 echo ^        runAsNonRoot: true
 echo ^        seccompProfile:
@@ -131,7 +131,7 @@ echo ^      - name: api
 echo ^        image: caf0957b5c26acr.azurecr.io/goose-api-server:2609251236
 echo ^        envFrom:
 echo ^        - configMapRef:
-echo ^            name: testuser-env
+echo ^            name: goose-api-main-env
 echo ^        ports:
 echo ^        - containerPort: 3001
 echo ^        securityContext:
@@ -157,11 +157,11 @@ kubectl apply -f deployment.yaml
 echo apiVersion: v1
 echo kind: Service
 echo metadata:
-echo ^  name: testuser-svc
-echo ^  namespace: testuser
+echo ^  name: goose-api-main-svc
+echo ^  namespace: goose-api-main
 echo spec:
 echo ^  selector:
-echo ^    app: testuser-api
+echo ^    app: goose-api-main-api
 echo ^  ports:
 echo ^  - port: 80
 echo ^    targetPort: 3001
@@ -176,39 +176,39 @@ kubectl apply -f service.yaml
 echo apiVersion: networking.k8s.io/v1
 echo kind: Ingress
 echo metadata:
-echo ^  name: testuser-ingress
-echo ^  namespace: testuser
+echo ^  name: goose-api-main-ingress
+echo ^  namespace: goose-api-main
 echo spec:
 echo ^  ingressClassName: web
 echo ^  rules:
-echo ^  - host: testuser.env.example.com
+echo ^  - host: goose-api-main.env.example.com
 echo ^    http:
 echo ^      paths:
 echo ^      - path: /
 echo ^        pathType: Prefix
 echo ^        backend:
 echo ^          service:
-echo ^            name: testuser-svc
+echo ^            name: goose-api-main-svc
 echo ^            port:
 echo ^              number: 80
 echo ^  tls:
 echo ^  - hosts:
-echo ^    - testuser.env.example.com
-echo ^    secretName: testuser-tls
+echo ^    - goose-api-main.env.example.com
+echo ^    secretName: goose-api-main-tls
 ) > ingress.yaml
 
 kubectl apply -f ingress.yaml
 
 # 7. Activate environment when user connects
-kubectl scale deployment testuser-api -n testuser --replicas=1
+kubectl scale deployment goose-api-main-api -n goose-api-main --replicas=1
 
 # 8. Fetch external access details
-kubectl get service testuser-svc -n testuser -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+kubectl get service goose-api-main-svc -n goose-api-main -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 # (or hostname if provided) and optionally the ingress hostname if configured:
-kubectl get ingress testuser-ingress -n testuser -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+kubectl get ingress goose-api-main-ingress -n goose-api-main -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
 # 9. Deactivate environment when user leaves
-kubectl scale deployment testuser-api -n testuser --replicas=0
+kubectl scale deployment goose-api-main-api -n goose-api-main --replicas=0
 ```
 
 ## Automation Opportunities
