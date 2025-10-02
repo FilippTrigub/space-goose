@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform-gateway
+  namespace: 
+spec:
+  podSelector:
+    matchLabels:
+      app: proj--api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              role: platform-gateway
+      ports:
+        - protocol: TCP
+          port: 3001

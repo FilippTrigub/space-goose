@@ -106,7 +106,7 @@ class ParallelMetrics:
 
 
 class ParallelTester:
-    def __init__(self, base_url: str, user_id: str = "user1"):
+    def __init__(self, base_url: str, user_id: str = "user3"):
         self.base_url = base_url.rstrip("/")
         self.user_id = user_id
         self.metrics = ParallelMetrics()
@@ -480,8 +480,8 @@ def main():
     parser.add_argument(
         "--user-id",
         type=str,
-        default="user1",
-        help="User ID to use for tests (default: user1)",
+        default="user3",
+        help="User ID to use for tests (default: user3)",
     )
     parser.add_argument(
         "--create-timeout",

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: proj--api
+  namespace: 
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: proj--api
+  template:
+    metadata:
+      labels:
+        app: proj--api
+        project-id: 
+        user-id: 
+    spec:
+      serviceAccountName: -bot
+      containers:
+        - name: api
+          image: 
+          envFrom:
+            - configMapRef:
+                name: -env
+          ports:
+            - containerPort: 3001
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3001
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3001
+            initialDelaySeconds: 30
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
