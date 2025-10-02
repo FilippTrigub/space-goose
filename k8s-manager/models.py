@@ -6,6 +6,7 @@ class ProjectCreate(BaseModel):
     name: str
     github_key: Optional[str] = None
     repo_url: Optional[str] = None
+    blackbox_api_key: Optional[str] = None
 
 class ProjectUpdate(BaseModel):
     name: str
@@ -42,6 +43,13 @@ class ProjectUpdateGitHubKey(BaseModel):
 # New model for user-level GitHub token
 class UserGitHubKey(BaseModel):
     github_key: Optional[str] = None
+
+# New models for API key management (simplified - only BLACKBOX_API_KEY)
+class UserAPIKeys(BaseModel):
+    blackbox_api_key: Optional[str] = None
+
+class ProjectUpdateAPIKeys(BaseModel):
+    blackbox_api_key: Optional[str] = None
 
 class Extension(BaseModel):
     name: str

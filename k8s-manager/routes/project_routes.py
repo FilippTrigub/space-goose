@@ -21,13 +21,20 @@ from models import (
     ExtensionToggle,
     SettingUpdate,
     UserGitHubKey,
+    UserAPIKeys,
+    ProjectUpdateAPIKeys,
 )
 from services import mongodb_service, k8s_service
+from .utils import resolve_endpoint_info, target_and_headers, goose_request
 
 router = APIRouter()
 
 # Static user list for MVP
-users = [{"id": "user1", "name": "User 1"}, {"id": "user2", "name": "User 2"}]
+users = [
+    {"id": "user1", "name": "User 1"},
+    {"id": "user2", "name": "User 2"},
+    {"id": "user3", "name": "FILIPP TEST USER"},
+]
 
 
 @router.get("/users", response_model=List[User], tags=["Users"])
@@ -44,7 +51,9 @@ async def get_users():
     return [User(**user) for user in users]
 
 
-@router.get("/users/{user_id}/projects", operation_id="get_user_projects", tags=["Projects"])
+@router.get(
+    "/users/{user_id}/projects", operation_id="get_user_projects", tags=["Projects"]
+)
 async def get_projects(user_id: str):
     """
     Get all projects for a specific user.
@@ -82,6 +91,8 @@ async def get_projects(user_id: str):
             "endpoint": project.get("endpoint"),
             "github_key_set": project.get("github_key_set", False),
             "github_key_source": project.get("github_key_source"),
+            "blackbox_api_key_set": project.get("blackbox_api_key_set", False),
+            "blackbox_api_key_source": project.get("blackbox_api_key_source"),
             "repo_url": project.get("repo_url"),
             "has_repository": project.get("has_repository", False),
             "sessions": project.get("sessions", []),
@@ -92,7 +103,9 @@ async def get_projects(user_id: str):
     ]
 
 
-@router.post("/users/{user_id}/projects", operation_id="create_project", tags=["Projects"])
+@router.post(
+    "/users/{user_id}/projects", operation_id="create_project", tags=["Projects"]
+)
 async def create_project(user_id: str, project: ProjectCreate):
     """
     Create a new project with Kubernetes resources.
@@ -149,24 +162,39 @@ async def create_project(user_id: str, project: ProjectCreate):
     else:
         user_secret_exists = False
 
+    # Handle API keys - check if user has global API keys
+    user_api_keys = mongodb_service.has_user_api_key(user_id)
+    if user_api_keys["blackbox_api_key_set"]:
+        # Update project to show it's using user's global keys
+        mongodb_service.update_project_api_key_status(
+            project_id,
+            blackbox_source="user" if user_api_keys["blackbox_api_key_set"] else None,
+            blackbox_set=user_api_keys["blackbox_api_key_set"],
+        )
+
     # Create K8s resources and activate
     try:
-        await k8s_service.apply_project_resources(user_id, project_id, github_key, user_secret_exists)
+        await k8s_service.apply_project_resources(
+            user_id, project_id, github_key, project.blackbox_api_key, user_secret_exists
+        )
 
         # Wait for LoadBalancer IP assignment first
-        endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
-        
+        endpoint_info = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
+        endpoint_host = endpoint_info["host"]
+
         # Wait for pod readiness
         await k8s_service.wait_for_pod_readiness(user_id, project_id)
 
         # Then wait for pod to be healthy
-        await k8s_service.wait_for_pod_health(user_id, project_id, endpoint)
+        await k8s_service.wait_for_pod_health(user_id, project_id, endpoint_info)
 
         # If repository URL is provided, clone it after pod is healthy
         if project.repo_url:
             try:
                 print(f"📂 Cloning repository: {project.repo_url}")
-                await k8s_service.clone_repository_on_pod(user_id, project_id, project.repo_url, endpoint)
+                await k8s_service.clone_repository_on_pod(
+                    user_id, project_id, project.repo_url, endpoint_host
+                )
                 print(f"✅ Repository cloned successfully")
             except Exception as e:
                 print(f"❌ Repository cloning failed: {e}")
@@ -175,11 +203,15 @@ async def create_project(user_id: str, project: ProjectCreate):
                 pass
 
         # Update status in MongoDB
-        mongodb_service.update_project_status(project_id, "active", endpoint)
+        mongodb_service.update_project_status(project_id, "active", endpoint_host)
 
         # Store GitHub key in MongoDB if provided (masked)
         if github_key:
             mongodb_service.store_github_key(project_id, github_key)
+            
+        # Store project API key in MongoDB if provided (masked)
+        if project.blackbox_api_key:
+            mongodb_service.store_project_api_key(project_id, project.blackbox_api_key)
 
     except Exception as e:
         # Rollback MongoDB record if K8s fails
@@ -191,7 +223,11 @@ async def create_project(user_id: str, project: ProjectCreate):
     return {"message": "Project created successfully", "project_id": project_id}
 
 
-@router.put("/users/{user_id}/projects/{project_id}", operation_id="update_project", tags=["Projects"])
+@router.put(
+    "/users/{user_id}/projects/{project_id}",
+    operation_id="update_project",
+    tags=["Projects"],
+)
 async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
     """
     Update an existing project's name and metadata.
@@ -220,7 +256,11 @@ async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
     return {"message": "Project updated successfully"}
 
 
-@router.delete("/users/{user_id}/projects/{project_id}", operation_id="delete_project", tags=["Projects"])
+@router.delete(
+    "/users/{user_id}/projects/{project_id}",
+    operation_id="delete_project",
+    tags=["Projects"],
+)
 async def delete_project(user_id: str, project_id: str):
     """
     Delete a project and all its associated Kubernetes resources.
@@ -249,7 +289,7 @@ async def delete_project(user_id: str, project_id: str):
         except PodNotFoundException:
             mongodb_service.delete_project(project_id)
             return {"message": "Project deleted successfully"}
-            
+
     # Delete K8s resources
     k8s_service.delete_project_resources(user_id, project_id)
 
@@ -262,7 +302,9 @@ async def delete_project(user_id: str, project_id: str):
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/activate", operation_id="activate_project", tags=["Projects"]
+    "/users/{user_id}/projects/{project_id}/activate",
+    operation_id="activate_project",
+    tags=["Projects"],
 )
 async def activate_project(user_id: str, project_id: str):
     """
@@ -297,20 +339,23 @@ async def activate_project(user_id: str, project_id: str):
         k8s_service.scale_project(user_id, project_id, 1)
 
         # Wait for LoadBalancer IP assignment first
-        endpoint = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
-        
+        endpoint_info = await k8s_service.wait_for_loadbalancer_ip(user_id, project_id)
+        endpoint_host = endpoint_info["host"]
+
         # Wait for pod readiness
         await k8s_service.wait_for_pod_readiness(user_id, project_id)
 
         # Then wait for pod to be healthy
-        await k8s_service.wait_for_pod_health(user_id, project_id, endpoint)
+        await k8s_service.wait_for_pod_health(user_id, project_id, endpoint_info)
 
         # If repository URL is provided, clone it after pod is healthy
         repo_url = project.get("repo_url")
         if repo_url:
             try:
                 print(f"📂 Cloning repository on activation: {repo_url}")
-                await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url, endpoint)
+                await k8s_service.clone_repository_on_pod(
+                    user_id, project_id, repo_url, endpoint_host
+                )
                 print(f"✅ Repository cloned successfully")
             except Exception as e:
                 print(f"❌ Repository cloning failed: {e}")
@@ -318,9 +363,12 @@ async def activate_project(user_id: str, project_id: str):
                 pass
 
         # Update status in MongoDB
-        mongodb_service.update_project_status(project_id, "active", endpoint)
+        mongodb_service.update_project_status(project_id, "active", endpoint_host)
 
-        return {"message": "Project activated successfully", "endpoint": endpoint}
+        return {
+            "message": "Project activated successfully",
+            "endpoint": endpoint_host,
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to activate project: {str(e)}"
@@ -330,7 +378,8 @@ async def activate_project(user_id: str, project_id: str):
 # New endpoint for manual repository cloning
 @router.post(
     "/users/{user_id}/projects/{project_id}/clone-repository",
-    operation_id="clone_repository", tags=["Projects"]
+    operation_id="clone_repository",
+    tags=["Projects"],
 )
 async def clone_repository(user_id: str, project_id: str):
     """
@@ -343,22 +392,32 @@ async def clone_repository(user_id: str, project_id: str):
             raise HTTPException(status_code=404, detail="Project not found")
 
         if project["user_id"] != user_id:
-            raise HTTPException(status_code=403, detail="Project belongs to different user")
+            raise HTTPException(
+                status_code=403, detail="Project belongs to different user"
+            )
 
         if project["status"] != "active":
-            raise HTTPException(status_code=400, detail="Project must be active to clone repository")
+            raise HTTPException(
+                status_code=400, detail="Project must be active to clone repository"
+            )
 
         repo_url = project.get("repo_url")
         if not repo_url:
-            raise HTTPException(status_code=400, detail="No repository URL configured for this project")
+            raise HTTPException(
+                status_code=400, detail="No repository URL configured for this project"
+            )
 
         # Get the project endpoint
-        endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-        if not endpoint:
-            raise HTTPException(status_code=500, detail="Project endpoint not available")
+        endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+        if not endpoint_info:
+            raise HTTPException(
+                status_code=500, detail="Project endpoint not available"
+            )
 
         # Clone the repository
-        await k8s_service.clone_repository_on_pod(user_id, project_id, repo_url, endpoint)
+        await k8s_service.clone_repository_on_pod(
+            user_id, project_id, repo_url, endpoint_info["host"]
+        )
 
         return {"message": f"Repository {repo_url} cloned successfully"}
 
@@ -372,7 +431,8 @@ async def clone_repository(user_id: str, project_id: str):
 
 @router.put(
     "/users/{user_id}/projects/{project_id}/github-key",
-    operation_id="update_project_github_key", tags=["GitHub Integration"],
+    operation_id="update_project_github_key",
+    tags=["GitHub Integration"],
 )
 async def update_project_github_key(
     user_id: str, project_id: str, github_key_data: ProjectUpdateGitHubKey
@@ -427,7 +487,8 @@ async def update_project_github_key(
 
 @router.post(
     "/users/{user_id}/projects/{project_id}/deactivate",
-    operation_id="deactivate_project", tags=["Projects"],
+    operation_id="deactivate_project",
+    tags=["Projects"],
 )
 async def deactivate_project(user_id: str, project_id: str):
     """
@@ -463,7 +524,11 @@ async def deactivate_project(user_id: str, project_id: str):
 
 
 # New user GitHub token endpoints
-@router.put("/users/{user_id}/github-key", operation_id="update_user_github_key", tags=["GitHub Integration"])
+@router.put(
+    "/users/{user_id}/github-key",
+    operation_id="update_user_github_key",
+    tags=["GitHub Integration"],
+)
 async def update_user_github_key(user_id: str, github_key_data: UserGitHubKey):
     """Set or update the global GitHub key for a user"""
     try:
@@ -518,7 +583,11 @@ async def update_user_github_key(user_id: str, github_key_data: UserGitHubKey):
         )
 
 
-@router.get("/users/{user_id}/github-key", operation_id="check_user_github_key", tags=["GitHub Integration"])
+@router.get(
+    "/users/{user_id}/github-key",
+    operation_id="check_user_github_key",
+    tags=["GitHub Integration"],
+)
 async def check_user_github_key(user_id: str):
     """Check if a user has a global GitHub key set"""
     try:
@@ -531,7 +600,11 @@ async def check_user_github_key(user_id: str):
         )
 
 
-@router.delete("/users/{user_id}/github-key", operation_id="delete_user_github_key", tags=["GitHub Integration"])
+@router.delete(
+    "/users/{user_id}/github-key",
+    operation_id="delete_user_github_key",
+    tags=["GitHub Integration"],
+)
 async def delete_user_github_key(user_id: str):
     """Remove the global GitHub key for a user"""
     try:
@@ -562,11 +635,167 @@ async def delete_user_github_key(user_id: str):
         )
 
 
+# API Keys Management Endpoints
+
+
+@router.put(
+    "/users/{user_id}/api-keys", operation_id="update_user_api_keys", tags=["API Keys"]
+)
+async def update_user_api_key(user_id: str, api_keys_data: UserAPIKeys):
+    """Set or update the global API keys for a user"""
+    try:
+        # First store in K8s as secret
+        if api_keys_data.blackbox_api_key:
+            k8s_service.create_or_update_user_api_key_secret(
+                user_id, api_keys_data.blackbox_api_key
+            )
+
+            # Then store in MongoDB (masked)
+            mongodb_service.store_user_api_key(user_id, api_keys_data.blackbox_api_key)
+
+            # Update any projects that don't have their own keys to use these
+            projects = mongodb_service.list_projects(user_id)
+            for project in projects:
+                project_id = str(project["_id"])
+
+                # Update blackbox key status if provided
+                if api_keys_data.blackbox_api_key:
+                    if (
+                        not project.get("blackbox_api_key_source")
+                        or project.get("blackbox_api_key_source") == "user"
+                    ):
+                        mongodb_service.update_project_api_key_status(
+                            project_id, blackbox_source="user", blackbox_set=True
+                        )
+
+            return {"message": "Global API keys set successfully"}
+        else:
+            # Remove the keys from K8s
+            k8s_service.delete_user_api_key_secret(user_id)
+
+            # Remove from MongoDB
+            mongodb_service.delete_user_api_key(user_id)
+
+            # Update projects that were using the global keys
+            projects = mongodb_service.list_projects(user_id)
+            for project in projects:
+                project_id = str(project["_id"])
+
+                # Update projects using user-level blackbox key
+                if project.get("blackbox_api_key_source") == "user":
+                    mongodb_service.update_project_api_key_status(
+                        project_id, blackbox_set=False
+                    )
+
+            return {"message": "Global API keys removed successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update global API keys: {str(e)}"
+        )
+
+
+@router.get(
+    "/users/{user_id}/api-keys", operation_id="check_user_api_keys", tags=["API Keys"]
+)
+async def check_user_api_key(user_id: str):
+    """Check if a user has API keys set"""
+    try:
+        # Check MongoDB for user
+        api_keys_status = mongodb_service.has_user_api_key(user_id)
+        return api_keys_status
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to check global API keys: {str(e)}"
+        )
+
+
+@router.delete(
+    "/users/{user_id}/api-keys", operation_id="delete_user_api_keys", tags=["API Keys"]
+)
+async def delete_user_api_key(user_id: str):
+    """Remove the global API keys for a user"""
+    try:
+        # Remove from K8s
+        k8s_service.delete_user_api_key_secret(user_id)
+
+        # Remove from MongoDB
+        mongodb_service.delete_user_api_key(user_id)
+
+        # Update projects that were using the global keys
+        projects = mongodb_service.list_projects(user_id)
+        for project in projects:
+            project_id = str(project["_id"])
+
+            # Update projects using user-level blackbox key
+            if project.get("blackbox_api_key_source") == "user":
+                mongodb_service.update_project_api_key_status(
+                    project_id, blackbox_set=False
+                )
+
+        return {"message": "Global API keys removed successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete global API keys: {str(e)}"
+        )
+
+
+@router.put(
+    "/users/{user_id}/projects/{project_id}/api-keys",
+    operation_id="update_project_api_keys",
+    tags=["API Keys"],
+)
+async def update_project_api_key(
+    user_id: str, project_id: str, api_keys_data: ProjectUpdateAPIKeys
+):
+    """Update API keys for an existing project"""
+    # Check if project exists
+    project = mongodb_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Project belongs to different user")
+
+    try:
+        # Update Kubernetes secret
+        k8s_service.update_project_api_key_secret(
+            user_id, project_id, api_keys_data.blackbox_api_key
+        )
+
+        # Update MongoDB record
+        mongodb_service.store_project_api_key(
+            project_id, api_keys_data.blackbox_api_key
+        )
+
+        # Handle fallback to user keys if project keys are removed
+        user_api_keys = mongodb_service.has_user_api_key(user_id)
+
+        if not api_keys_data.blackbox_api_key and user_api_keys["blackbox_api_key_set"]:
+            # Removing project key but user has global key - fall back to user key
+            mongodb_service.update_project_api_key_status(
+                project_id, blackbox_source="user", blackbox_set=True
+            )
+        elif not api_keys_data.blackbox_api_key:
+            # No project key and no user key
+            mongodb_service.update_project_api_key_status(
+                project_id, blackbox_set=False
+            )
+
+        return {"message": "Project API keys updated successfully"}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to update project API keys: {str(e)}"
+        )
+
+
 # Session Management Endpoints
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/sessions", operation_id="create_session", tags=["Sessions"]
+    "/users/{user_id}/projects/{project_id}/sessions",
+    operation_id="create_session",
+    tags=["Sessions"],
 )
 async def create_session(user_id: str, project_id: str, session: SessionCreate):
     """Create a new session in the Goose API and store it in the project"""
@@ -580,24 +809,24 @@ async def create_session(user_id: str, project_id: str, session: SessionCreate):
             status_code=400, detail="Project must be active to create sessions"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
         # Create session in Goose API
-        create_url = f"http://{endpoint}/api/v1/sessions"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(create_url)
+        response = await goose_request(
+            "POST", endpoint_info, "/api/v1/sessions", timeout=10.0
+        )
 
-            if response.status_code != 201:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to create session in Goose API: {response.status_code}",
-                )
+        if response.status_code != 201:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create session in Goose API: {response.status_code}",
+            )
 
-            session_data = response.json()
-            session_id = session_data["session_id"]
+        session_data = response.json()
+        session_id = session_data["session_id"]
 
         # Store session in project
         session_record = {
@@ -623,7 +852,8 @@ async def create_session(user_id: str, project_id: str, session: SessionCreate):
 
 @router.get(
     "/users/{user_id}/projects/{project_id}/sessions",
-    operation_id="get_all_project_sessions", tags=["Sessions"],
+    operation_id="get_all_project_sessions",
+    tags=["Sessions"],
 )
 async def get_project_sessions(user_id: str, project_id: str):
     """Get all sessions for a project"""
@@ -635,7 +865,9 @@ async def get_project_sessions(user_id: str, project_id: str):
     return {"sessions": project.get("sessions", [])}
 
 
-@router.delete("/users/{user_id}/projects/{project_id}/sessions/{session_id}", tags=["Sessions"])
+@router.delete(
+    "/users/{user_id}/projects/{project_id}/sessions/{session_id}", tags=["Sessions"]
+)
 async def delete_session(user_id: str, project_id: str, session_id: str):
     """Delete a session from both Goose API and project data"""
     project = mongodb_service.get_project(project_id)
@@ -643,11 +875,16 @@ async def delete_session(user_id: str, project_id: str, session_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Try to delete from Goose API if project is active
-    if project["status"] == "active" and project.get("endpoint"):
+    if project["status"] == "active":
         try:
-            delete_url = f"http://{project['endpoint']}/api/v1/sessions/{session_id}"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.delete(delete_url)
+            endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+            if endpoint_info:
+                await goose_request(
+                    "DELETE",
+                    endpoint_info,
+                    f"/api/v1/sessions/{session_id}",
+                    timeout=10.0,
+                )
         except:
             # Continue even if Goose API deletion fails
             pass
@@ -663,7 +900,8 @@ async def delete_session(user_id: str, project_id: str, session_id: str):
 
 @router.get(
     "/users/{user_id}/projects/{project_id}/sessions/{session_id}/messages",
-    operation_id="get_session_messages", tags=["Sessions"],
+    operation_id="get_session_messages",
+    tags=["Sessions"],
 )
 async def get_session_messages(user_id: str, project_id: str, session_id: str):
     """Get message history for a session"""
@@ -678,8 +916,8 @@ async def get_session_messages(user_id: str, project_id: str, session_id: str):
     if project["status"] != "active":
         raise HTTPException(status_code=400, detail="Project is not active")
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     # Verify session exists in project
@@ -690,23 +928,24 @@ async def get_session_messages(user_id: str, project_id: str, session_id: str):
 
     try:
         # Forward to Goose API to get message history
-        goose_url = f"http://{endpoint}/api/v1/sessions/{session_id}/messages"
-        print(f"Fetching message history from: {goose_url}")
+        response = await goose_request(
+            "GET",
+            endpoint_info,
+            f"/api/v1/sessions/{session_id}/messages",
+            timeout=30.0,
+        )
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(goose_url)
-
-            if response.status_code == 200:
-                return response.json()
-            elif response.status_code == 404:
-                # Session not found in Goose API, return empty
-                return {"session_id": session_id, "messages": [], "total_count": 0}
-            else:
-                error_text = response.text
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Goose API returned {response.status_code}: {error_text}",
-                )
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            # Session not found in Goose API, return empty
+            return {"session_id": session_id, "messages": [], "total_count": 0}
+        else:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Goose API returned {response.status_code}: {error_text}",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -736,23 +975,23 @@ async def get_project_extensions(user_id: str, project_id: str):
             status_code=400, detail="Project must be active to manage extensions"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/extensions"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(goose_url)
+        response = await goose_request(
+            "GET", endpoint_info, "/api/v1/extensions", timeout=10.0
+        )
 
-            if response.status_code == 200:
-                return response.json()
-            else:
-                error_text = response.text
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Goose API returned {response.status_code}: {error_text}",
-                )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Goose API returned {response.status_code}: {error_text}",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -781,8 +1020,8 @@ async def create_project_extension(
             status_code=400, detail="Project must be active to create extensions"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
@@ -811,22 +1050,26 @@ async def create_project_extension(
                 extension_data["envs"] = extension.envs
 
         # Create extension in Goose API first
-        goose_url = f"http://{endpoint}/api/v1/extensions"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(goose_url, json=extension_data)
+        response = await goose_request(
+            "POST",
+            endpoint_info,
+            "/api/v1/extensions",
+            timeout=30.0,
+            json_payload=extension_data,
+        )
 
-            if response.status_code != 201:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or f"Failed to create extension",
-                )
+        if response.status_code != 201:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or "Failed to create extension",
+            )
 
         # If extension has environment variables, update K8s deployment
         if extension.envs:
@@ -864,7 +1107,10 @@ async def update_project_env_vars(user_id: str, project_id: str, env_vars: dict)
         )
 
 
-@router.put("/users/{user_id}/projects/{project_id}/extensions/{extension_name}/toggle", tags=["Extensions"])
+@router.put(
+    "/users/{user_id}/projects/{project_id}/extensions/{extension_name}/toggle",
+    tags=["Extensions"],
+)
 async def toggle_project_extension(
     user_id: str, project_id: str, extension_name: str, toggle_data: ExtensionToggle
 ):
@@ -881,34 +1127,38 @@ async def toggle_project_extension(
             status_code=400, detail="Project must be active to toggle extensions"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/extensions/{extension_name}/toggle"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.put(goose_url, json=toggle_data.dict())
+        response = await goose_request(
+            "PUT",
+            endpoint_info,
+            f"/api/v1/extensions/{extension_name}/toggle",
+            timeout=10.0,
+            json_payload=toggle_data.dict(),
+        )
 
-            if response.status_code == 200:
-                result = response.json()
-                action = "enabled" if toggle_data.enabled else "disabled"
-                return {
-                    "message": f"Extension {action} successfully",
-                    "extension": result,
-                }
-            else:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or f"Failed to toggle extension",
-                )
+        if response.status_code == 200:
+            result = response.json()
+            action = "enabled" if toggle_data.enabled else "disabled"
+            return {
+                "message": f"Extension {action} successfully",
+                "extension": result,
+            }
+        else:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or f"Failed to toggle extension",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -920,7 +1170,10 @@ async def toggle_project_extension(
         )
 
 
-@router.delete("/users/{user_id}/projects/{project_id}/extensions/{extension_name}", tags=["Extensions"])
+@router.delete(
+    "/users/{user_id}/projects/{project_id}/extensions/{extension_name}",
+    tags=["Extensions"],
+)
 async def delete_project_extension(user_id: str, project_id: str, extension_name: str):
     """Delete an extension from a project"""
     project = mongodb_service.get_project(project_id)
@@ -935,42 +1188,45 @@ async def delete_project_extension(user_id: str, project_id: str, extension_name
             status_code=400, detail="Project must be active to delete extensions"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/extensions/{extension_name}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.delete(goose_url)
+        response = await goose_request(
+            "DELETE",
+            endpoint_info,
+            f"/api/v1/extensions/{extension_name}",
+            timeout=10.0,
+        )
 
-            if response.status_code == 204:
-                return {"message": "Extension deleted successfully"}
-            elif response.status_code == 404:
-                raise HTTPException(status_code=404, detail="Extension not found")
-            elif response.status_code == 400:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail=error_data.get("message")
-                    or "Cannot delete enabled extension. Disable it first.",
-                )
-            else:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or f"Failed to delete extension",
-                )
+        if response.status_code == 204:
+            return {"message": "Extension deleted successfully"}
+        elif response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Extension not found")
+        elif response.status_code == 400:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=error_data.get("message")
+                or "Cannot delete enabled extension. Disable it first.",
+            )
+        else:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or f"Failed to delete extension",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -983,7 +1239,9 @@ async def delete_project_extension(user_id: str, project_id: str, extension_name
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/messages", operation_id="send_message", tags=["Messaging"]
+    "/users/{user_id}/projects/{project_id}/messages",
+    operation_id="send_message",
+    tags=["Messaging"],
 )
 async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
     """Send message to a specific session and stream the response"""
@@ -995,8 +1253,8 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
     if project["status"] != "active":
         raise HTTPException(status_code=400, detail="Project is not active")
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     # Verify session exists in project
@@ -1007,7 +1265,8 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
 
     try:
         # Forward to Goose API
-        goose_url = f"http://{endpoint}/api/v1/sessions/{message.session_id}/messages"
+        target, base_headers = target_and_headers(endpoint_info)
+        goose_url = f"http://{target}/api/v1/sessions/{message.session_id}/messages"
         print(f"Proxying message to: {goose_url}")
 
         async def stream_response():
@@ -1018,7 +1277,7 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
                     json={
                         "message": message.content
                     },  # Note: API expects "message" not "content"
-                    headers={"Accept": "text/event-stream"},
+                    headers={**base_headers, "Accept": "text/event-stream"},
                 ) as response:
                     if response.status_code != 200:
                         error_text = await response.aread()
@@ -1066,7 +1325,8 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
 
 @router.post(
     "/users/{user_id}/projects/{project_id}/messages/send",
-    operation_id="send_message_fire_and_forget", tags=["Messaging"],
+    operation_id="send_message_fire_and_forget",
+    tags=["Messaging"],
 )
 async def send_message_sync(user_id: str, project_id: str, message: MessageRequest):
     """
@@ -1106,8 +1366,8 @@ async def send_message_sync(user_id: str, project_id: str, message: MessageReque
     if project["status"] != "active":
         raise HTTPException(status_code=400, detail="Project is not active")
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     # Verify session exists in project
@@ -1118,16 +1378,15 @@ async def send_message_sync(user_id: str, project_id: str, message: MessageReque
 
     try:
         # Forward to Goose API non-streaming endpoint
-        goose_url = f"http://{endpoint}/api/v1/sessions/{message.session_id}/send"
+        target, base_headers = target_and_headers(endpoint_info)
+        goose_url = f"http://{target}/api/v1/sessions/{message.session_id}/send"
         print(f"Sending message (fire-and-forget) to: {goose_url}")
 
-        async with httpx.AsyncClient(
-            timeout=120.0
-        ) as client:  # Longer timeout for non-streaming
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 goose_url,
                 json={"message": message.content},
-                headers={"Content-Type": "application/json"},
+                headers={**base_headers, "Content-Type": "application/json"},
             )
 
             if response.status_code == 200:
@@ -1160,7 +1419,8 @@ async def send_message_sync(user_id: str, project_id: str, message: MessageReque
 
 @router.get(
     "/users/{user_id}/projects/{project_id}/settings",
-    operation_id="get_all_project_settings", tags=["Settings"],
+    operation_id="get_all_project_settings",
+    tags=["Settings"],
 )
 async def get_project_settings(user_id: str, project_id: str):
     """Get all settings for a project"""
@@ -1176,23 +1436,23 @@ async def get_project_settings(user_id: str, project_id: str):
             status_code=400, detail="Project must be active to manage settings"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/settings"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(goose_url)
+        response = await goose_request(
+            "GET", endpoint_info, "/api/v1/settings", timeout=10.0
+        )
 
-            if response.status_code == 200:
-                return response.json()
-            else:
-                error_text = response.text
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Goose API returned {response.status_code}: {error_text}",
-                )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Goose API returned {response.status_code}: {error_text}",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -1206,7 +1466,8 @@ async def get_project_settings(user_id: str, project_id: str):
 
 @router.get(
     "/users/{user_id}/projects/{project_id}/settings/{setting_key}",
-    operation_id="get_specific_project_setting", tags=["Settings"],
+    operation_id="get_specific_project_setting",
+    tags=["Settings"],
 )
 async def get_project_setting(user_id: str, project_id: str, setting_key: str):
     """Get a specific setting for a project"""
@@ -1222,25 +1483,28 @@ async def get_project_setting(user_id: str, project_id: str, setting_key: str):
             status_code=400, detail="Project must be active to view settings"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/settings/{setting_key}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(goose_url)
+        response = await goose_request(
+            "GET",
+            endpoint_info,
+            f"/api/v1/settings/{setting_key}",
+            timeout=10.0,
+        )
 
-            if response.status_code == 200:
-                return response.json()
-            elif response.status_code == 404:
-                raise HTTPException(status_code=404, detail="Setting not found")
-            else:
-                error_text = response.text
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Goose API returned {response.status_code}: {error_text}",
-                )
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Setting not found")
+        else:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Goose API returned {response.status_code}: {error_text}",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -1254,7 +1518,8 @@ async def get_project_setting(user_id: str, project_id: str, setting_key: str):
 
 @router.put(
     "/users/{user_id}/projects/{project_id}/settings/{setting_key}",
-    operation_id="update_project_setting", tags=["Settings"],
+    operation_id="update_project_setting",
+    tags=["Settings"],
 )
 async def update_project_setting(
     user_id: str, project_id: str, setting_key: str, setting_data: SettingUpdate
@@ -1272,48 +1537,52 @@ async def update_project_setting(
             status_code=400, detail="Project must be active to update settings"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/settings/{setting_key}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.put(goose_url, json=setting_data.dict())
+        response = await goose_request(
+            "PUT",
+            endpoint_info,
+            f"/api/v1/settings/{setting_key}",
+            timeout=10.0,
+            json_payload=setting_data.dict(),
+        )
 
-            if response.status_code == 200:
-                result = response.json()
-                return {
-                    "message": f"Setting {setting_key} updated successfully",
-                    "setting": result,
-                    "restart_required": result.get("restart_required", False),
-                }
-            elif response.status_code == 400:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or "Invalid setting value",
-                )
-            elif response.status_code == 404:
-                raise HTTPException(status_code=404, detail="Setting not found")
-            else:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or f"Failed to update setting",
-                )
+        if response.status_code == 200:
+            result = response.json()
+            return {
+                "message": f"Setting {setting_key} updated successfully",
+                "setting": result,
+                "restart_required": result.get("restart_required", False),
+            }
+        elif response.status_code == 400:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or "Invalid setting value",
+            )
+        elif response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Setting not found")
+        else:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or f"Failed to update setting",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -1327,7 +1596,8 @@ async def update_project_setting(
 
 @router.delete(
     "/users/{user_id}/projects/{project_id}/settings/{setting_key}",
-    operation_id="reset_project_settings", tags=["Settings"],
+    operation_id="reset_project_settings",
+    tags=["Settings"],
 )
 async def reset_project_setting(user_id: str, project_id: str, setting_key: str):
     """Reset a setting to its default value for a project"""
@@ -1343,46 +1613,49 @@ async def reset_project_setting(user_id: str, project_id: str, setting_key: str)
             status_code=400, detail="Project must be active to reset settings"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/settings/{setting_key}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.delete(goose_url)
+        response = await goose_request(
+            "DELETE",
+            endpoint_info,
+            f"/api/v1/settings/{setting_key}",
+            timeout=10.0,
+        )
 
-            if response.status_code == 200:
-                result = response.json()
-                return {
-                    "message": f"Setting {setting_key} reset to default successfully",
-                    "setting": result,
-                }
-            elif response.status_code == 404:
-                raise HTTPException(status_code=404, detail="Setting not found")
-            elif response.status_code == 400:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail=error_data.get("message")
-                    or "Cannot reset setting (may be overridden by environment variable)",
-                )
-            else:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or f"Failed to reset setting",
-                )
+        if response.status_code == 200:
+            result = response.json()
+            return {
+                "message": f"Setting {setting_key} reset to default successfully",
+                "setting": result,
+            }
+        elif response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Setting not found")
+        elif response.status_code == 400:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=error_data.get("message")
+                or "Cannot reset setting (may be overridden by environment variable)",
+            )
+        else:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or f"Failed to reset setting",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -1396,7 +1669,8 @@ async def reset_project_setting(user_id: str, project_id: str, setting_key: str)
 
 @router.put(
     "/users/{user_id}/projects/{project_id}/settings",
-    operation_id="update_project_settings_in_bulk", tags=["Settings"],
+    operation_id="update_project_settings_in_bulk",
+    tags=["Settings"],
 )
 async def update_project_settings_bulk(
     user_id: str, project_id: str, settings_data: dict
@@ -1414,33 +1688,37 @@ async def update_project_settings_bulk(
             status_code=400, detail="Project must be active to update settings"
         )
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/settings"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.put(goose_url, json=settings_data)
+        response = await goose_request(
+            "PUT",
+            endpoint_info,
+            "/api/v1/settings",
+            timeout=30.0,
+            json_payload=settings_data,
+        )
 
-            if response.status_code == 200:
-                result = response.json()
-                return {
-                    "message": f"Bulk settings update completed: {result.get('success_count', 0)}/{result.get('total_count', 0)} settings updated",
-                    "result": result,
-                }
-            else:
-                error_data = (
-                    response.json()
-                    if response.headers.get("content-type") == "application/json"
-                    else {"detail": response.text}
-                )
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=error_data.get("message")
-                    or error_data.get("detail")
-                    or f"Failed to update settings",
-                )
+        if response.status_code == 200:
+            result = response.json()
+            return {
+                "message": f"Bulk settings update completed: {result.get('success_count', 0)}/{result.get('total_count', 0)} settings updated",
+                "result": result,
+            }
+        else:
+            error_data = (
+                response.json()
+                if response.headers.get("content-type") == "application/json"
+                else {"detail": response.text}
+            )
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=error_data.get("message")
+                or error_data.get("detail")
+                or f"Failed to update settings",
+            )
 
     except httpx.RequestError as e:
         raise HTTPException(
@@ -1454,7 +1732,8 @@ async def update_project_settings_bulk(
 
 @router.get(
     "/users/{user_id}/projects/{project_id}/agent/status",
-    operation_id="get_agent_status", tags=["Agent Status"],
+    operation_id="get_agent_status",
+    tags=["Agent Status"],
 )
 async def get_agent_status(user_id: str, project_id: str):
     """Get the current status of the AI agent for a project"""
@@ -1475,26 +1754,26 @@ async def get_agent_status(user_id: str, project_id: str):
             "project_status": "inactive",
         }
 
-    endpoint = k8s_service.get_project_endpoint(user_id, project_id)
-    if not endpoint:
+    endpoint_info = resolve_endpoint_info(user_id, project_id, project)
+    if not endpoint_info:
         raise HTTPException(status_code=500, detail="Project endpoint not available")
 
     try:
-        goose_url = f"http://{endpoint}/api/v1/agent/status"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(goose_url)
+        response = await goose_request(
+            "GET", endpoint_info, "/api/v1/agent/status", timeout=10.0
+        )
 
-            if response.status_code == 200:
-                result = response.json()
-                # Add project status for context
-                result["project_status"] = "active"
-                return result
-            else:
-                error_text = response.text
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Goose API returned {response.status_code}: {error_text}",
-                )
+        if response.status_code == 200:
+            result = response.json()
+            # Add project status for context
+            result["project_status"] = "active"
+            return result
+        else:
+            error_text = response.text
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Goose API returned {response.status_code}: {error_text}",
+            )
 
     except httpx.RequestError as e:
         # If we can't connect, assume agent is down

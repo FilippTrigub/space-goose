@@ -177,6 +177,7 @@ async def apply_project_resources(
     user_id: str,
     project_id: str,
     github_key: str = None,
+    blackbox_api_key: str = None,
     user_secret_exists: bool = False,
 ):
     """
@@ -238,10 +239,57 @@ async def apply_project_resources(
         print(f"✗ Unexpected error retrieving ConfigMap: {e}")
         raise e
 
+    # Check if user has API keys secret
+    user_api_key_secret_exists = get_user_api_key_secret(user_id)
+
+    # Create Project API Key Secret if provided (sets both BLACKBOX_API_KEY and OPENAI_API_KEY)
+    project_api_key_secret_name = None
+    if blackbox_api_key:
+        project_api_key_secret_name = f"proj-{project_id}-api-key"
+        try:
+            # Check if secret already exists
+            core_v1.read_namespaced_secret(name=project_api_key_secret_name, namespace=namespace)
+            print(
+                f"ℹ Project API Key Secret {project_api_key_secret_name} already exists in namespace {namespace}"
+            )
+        except ApiException as e:
+            if e.status == 404:
+                # Secret doesn't exist, create it
+                secret_data = {
+                    "BLACKBOX_API_KEY": base64.b64encode(
+                        blackbox_api_key.encode("utf-8")
+                    ).decode("utf-8"),
+                    "OPENAI_API_KEY": base64.b64encode(
+                        blackbox_api_key.encode("utf-8")
+                    ).decode("utf-8")
+                }
+                secret_body = client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=project_api_key_secret_name,
+                        labels={
+                            "managed-by": "k8s-manager",
+                            "user-id": user_id,
+                            "project-id": project_id,
+                        },
+                    ),
+                    type="Opaque",
+                    data=secret_data,
+                )
+                core_v1.create_namespaced_secret(namespace=namespace, body=secret_body)
+                print(
+                    f"✓ Created Project API Key Secret {project_api_key_secret_name} in namespace {namespace}"
+                )
+            else:
+                print(f"✗ Failed to check Project API Key Secret: {e}")
+                raise e
+        except Exception as e:
+            print(f"✗ Unexpected error with Project API Key Secret: {e}")
+            raise e
+
     # Create GitHub Key Secret if provided
     github_secret_name = None
     if user_secret_exists:
-        github_secret_name = f"user-user2-github-key"
+        github_secret_name = f"user-{user_id}-github-key"
     if github_key:
         github_secret_name = f"proj-{project_id}-github-key"
         try:
@@ -324,7 +372,7 @@ async def apply_project_resources(
             ),
             # Resource limits for better startup performance
             resources=client.V1ResourceRequirements(
-                requests={"memory": "1024Mi", "cpu": "1000m"},
+                requests={"memory": "512Mi", "cpu": "500m"},
                 limits={"memory": "2048Mi", "cpu": "2000m"},
             ),
         )
@@ -344,6 +392,25 @@ async def apply_project_resources(
             env_from_sources.append(
                 client.V1EnvFromSource(
                     secret_ref=client.V1SecretEnvSource(name=github_secret_name)
+                )
+            )
+
+        # Add user API keys secret if available (unless project has its own API key)
+        if user_api_key_secret_exists and not project_api_key_secret_name:
+            user_api_key_secret_name = f"user-{user_id}-api-key"
+            print(f"using user API keys secret name: {user_api_key_secret_name}")
+            env_from_sources.append(
+                client.V1EnvFromSource(
+                    secret_ref=client.V1SecretEnvSource(name=user_api_key_secret_name)
+                )
+            )
+            
+        # Add project API key secret if available (overrides user keys)
+        if project_api_key_secret_name:
+            print(f"using project API keys secret name: {project_api_key_secret_name}")
+            env_from_sources.append(
+                client.V1EnvFromSource(
+                    secret_ref=client.V1SecretEnvSource(name=project_api_key_secret_name)
                 )
             )
 
@@ -495,7 +562,7 @@ async def wait_for_loadbalancer_ip(
 ):
     """
     Wait for shared ingress to publish the project host via the controller's static IP.
-    Returns the project host once the ingress reports a ready load balancer.
+    Returns a dict with the routable host and the controller IP/hostname.
     """
     namespace = f"user-{user_id}"
     ingress_name = f"proj-{project_id}-api"
@@ -523,7 +590,11 @@ async def wait_for_loadbalancer_ip(
                     print(
                         f"✅ Ingress {ingress_name} published via load balancer {identifier}"
                     )
-                    return host
+                    return {
+                        "host": host,
+                        "ip": lb_record.ip,
+                        "lb_hostname": lb_record.hostname,
+                    }
 
         except ApiException as e:
             if e.status == 404:
@@ -535,9 +606,7 @@ async def wait_for_loadbalancer_ip(
         print(f"⏳ Ingress not ready yet, waiting... ({elapsed}s elapsed)")
         await asyncio.sleep(3)
 
-    raise Exception(
-        f"Ingress readiness timed out after {timeout_seconds} seconds"
-    )
+    raise Exception(f"Ingress readiness timed out after {timeout_seconds} seconds")
 
 
 async def wait_for_pod_readiness(
@@ -588,7 +657,7 @@ async def wait_for_pod_readiness(
                             return True
                         else:
                             print(f"ready_condition: {ready_condition}")
-                else:
+                elif os.getenv("DEV_ENV") == "1":
                     print(f"pod.status: {pod.status}")
 
             elapsed = int(time.time() - start_time)
@@ -606,7 +675,10 @@ async def wait_for_pod_readiness(
 
 
 async def wait_for_pod_health(
-    user_id: str, project_id: str, endpoint: str, timeout_seconds: int = 300
+    user_id: str,
+    project_id: str,
+    endpoint: dict | str,
+    timeout_seconds: int = 300,
 ):
     """
     Wait for pod health endpoint to return 200.
@@ -614,15 +686,22 @@ async def wait_for_pod_health(
     """
     start_time = time.time()
 
-    print(f"⏳ Waiting for pod health at {endpoint}...")
+    host = endpoint["host"] if isinstance(endpoint, dict) else endpoint
+    controller_ip = endpoint.get("ip") if isinstance(endpoint, dict) else None
+    controller_hostname = (
+        endpoint.get("lb_hostname") if isinstance(endpoint, dict) else None
+    )
+    target = controller_ip or controller_hostname or host
+    headers = {"Host": host} if controller_ip else None
+
+    print(f"⏳ Waiting for pod health at {host} (target={target})...")
 
     while time.time() - start_time < timeout_seconds:
         try:
-            async with httpx.AsyncClient(
-                timeout=6.0
-            ) as client:  # Longer timeout for startup
-                health_url = f"http://{endpoint}/api/v1/health"
-                response = await client.get(health_url)
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                health_url = f"http://{target}/api/v1/health"
+                print(f"HEALTH CHECK AT URL: {health_url}")
+                response = await client.get(health_url, headers=headers)
 
                 if response.status_code == 200:
                     print(
@@ -638,8 +717,10 @@ async def wait_for_pod_health(
         except Exception as e:
             elapsed = int(time.time() - start_time)
             print(
-                f"⏳ Health check failed: {e.__class__.__name__}, endpoint: {endpoint}; retrying... ({elapsed}s elapsed)"
+                f"⏳ Health check failed: {e.__class__.__name__}, target: {target}; retrying... ({elapsed}s elapsed)"
             )
+
+        await asyncio.sleep(5)
 
     raise Exception(f"Pod health check timed out after {timeout_seconds} seconds")
 
@@ -795,12 +876,16 @@ def scale_project(user_id: str, project_id: str, replicas: int):
 
 def get_project_endpoint(user_id: str, project_id: str):
     """
-    Get the externally routable hostname for a project's ingress.
-    Returns None if the ingress has not finished publishing through the shared load balancer.
-    Returns None if not available instead of throwing exceptions.
+    Get ingress connectivity details for a project.
+    Returns a dict with keys:
+        - host: routable hostname for the project
+        - ip: load balancer IP, if available
+        - lb_hostname: load balancer hostname, if provided by the controller
+    Returns None if ingress status is not yet populated.
     """
     if os.getenv("DEV_ENV") == "1":
-        return "localhost:3001"
+        print("endpoint: localhost:3001")
+        return {"host": "localhost:3001", "ip": None, "lb_hostname": None}
 
     namespace = f"user-{user_id}"
     ingress_name = f"proj-{project_id}-api"
@@ -820,14 +905,21 @@ def get_project_endpoint(user_id: str, project_id: str):
             lb_record = ingress.status.load_balancer.ingress[0]
             identifier = lb_record.ip or lb_record.hostname
             if identifier:
-                print(f"✓ Ingress {ingress_name} published via {identifier}")
-                return host
+                print(
+                    f"✓ Ingress {ingress_name} resolved to host={host}, ip={lb_record.ip}, hostname={lb_record.hostname}"
+                )
+                return {
+                    "host": host,
+                    "ip": lb_record.ip,
+                    "lb_hostname": lb_record.hostname,
+                }
 
         # For existing projects, return None instead of throwing
         return None
 
     except ApiException as e:
         if e.status == 404:
+            print(f"Exception: {e}")
             return None
         else:
             print(f"✗ Failed to get ingress {ingress_name}: {e}")
@@ -1165,6 +1257,249 @@ def get_user_github_secret(user_id: str):
     except Exception as e:
         print(f"✗ Unexpected error checking user GitHub Secret: {e}")
         raise e
+
+
+# API Key secret management functions
+
+
+def create_or_update_user_api_key_secret(user_id: str, blackbox_key: str = None):
+    """
+    Create or update a user-level API keys secret.
+    """
+    namespace = f"user-{user_id}"
+    api_keys_secret_name = f"user-{user_id}-api-key"
+
+    # Ensure namespace exists
+    ensure_namespace(user_id)
+
+    # Prepare secret data
+    secret_data = {}
+    if blackbox_key:
+        secret_data["BLACKBOX_API_KEY"] = base64.b64encode(
+            blackbox_key.encode("utf-8")
+        ).decode("utf-8")
+        secret_data["OPENAI_API_KEY"] = base64.b64encode(
+            blackbox_key.encode("utf-8")
+        ).decode("utf-8")
+
+    if not secret_data:
+        # If no keys provided, delete the secret
+        return delete_user_api_key_secret(user_id)
+
+    # Create or update the secret
+    try:
+        # Check if secret already exists
+        try:
+            existing_secret = core_v1.read_namespaced_secret(
+                name=api_keys_secret_name, namespace=namespace
+            )
+            print(f"ℹ Updating existing user API keys secret {api_keys_secret_name}")
+
+            # Update secret data
+            existing_secret.data = secret_data
+
+            core_v1.replace_namespaced_secret(
+                name=api_keys_secret_name, namespace=namespace, body=existing_secret
+            )
+            print(
+                f"✓ Updated user API keys secret {api_keys_secret_name} in namespace {namespace}"
+            )
+
+        except ApiException as e:
+            if e.status == 404:
+                # Secret doesn't exist, create it
+                secret_body = client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=api_keys_secret_name,
+                        labels={
+                            "managed-by": "k8s-manager",
+                            "user-id": user_id,
+                            "type": "user-api-key",
+                        },
+                    ),
+                    type="Opaque",
+                    data=secret_data,
+                )
+                core_v1.create_namespaced_secret(namespace=namespace, body=secret_body)
+                print(
+                    f"✓ Created user API keys secret {api_keys_secret_name} in namespace {namespace}"
+                )
+            else:
+                print(f"✗ Failed to update user API keys secret: {e}")
+                raise e
+    except Exception as e:
+        print(f"✗ Unexpected error with user API keys secret: {e}")
+        raise e
+
+    return api_keys_secret_name
+
+
+def delete_user_api_key_secret(user_id: str):
+    """
+    Delete the user-level API keys secret.
+    """
+    namespace = f"user-{user_id}"
+    api_keys_secret_name = f"user-{user_id}-api-key"
+
+    try:
+        core_v1.delete_namespaced_secret(
+            name=api_keys_secret_name,
+            namespace=namespace,
+            body=client.V1DeleteOptions(grace_period_seconds=10),
+        )
+        print(
+            f"✓ Deleted user API keys secret {api_keys_secret_name} from namespace {namespace}"
+        )
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            print(
+                f"ℹ User API keys secret {api_keys_secret_name} was already deleted or doesn't exist"
+            )
+            return False
+        else:
+            print(f"✗ Failed to delete user API keys secret: {e}")
+            raise e
+    except Exception as e:
+        print(f"✗ Unexpected error deleting user API keys secret: {e}")
+        raise e
+
+
+def get_user_api_key_secret(user_id: str):
+    """
+    Check if a user-level API keys secret exists.
+    """
+    namespace = f"user-{user_id}"
+    api_keys_secret_name = f"user-{user_id}-api-key"
+
+    try:
+        secret = core_v1.read_namespaced_secret(
+            name=api_keys_secret_name, namespace=namespace
+        )
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            return False
+        else:
+            print(f"✗ Failed to check user API keys secret: {e}")
+            raise e
+    except Exception as e:
+        print(f"✗ Unexpected error checking user API keys secret: {e}")
+        raise e
+
+
+def update_project_api_key_secret(
+    user_id: str, project_id: str, blackbox_key: str = None
+):
+    """
+    Update or remove API keys secret for a project.
+    """
+    namespace = f"user-{user_id}"
+    api_keys_secret_name = f"proj-{project_id}-api-key"
+
+    # Prepare secret data
+    secret_data = {}
+    if blackbox_key:
+        secret_data["BLACKBOX_API_KEY"] = base64.b64encode(
+            blackbox_key.encode("utf-8")
+        ).decode("utf-8")
+        secret_data["OPENAI_API_KEY"] = base64.b64encode(
+            blackbox_key.encode("utf-8")
+        ).decode("utf-8")
+
+    if not secret_data:
+        # If no keys provided, delete the secret
+        try:
+            core_v1.delete_namespaced_secret(
+                name=api_keys_secret_name,
+                namespace=namespace,
+                body=client.V1DeleteOptions(grace_period_seconds=10),
+            )
+            print(
+                f"✓ Deleted project API keys secret {api_keys_secret_name} from namespace {namespace}"
+            )
+        except ApiException as e:
+            if e.status == 404:
+                print(
+                    f"ℹ Project API keys secret {api_keys_secret_name} was already deleted"
+                )
+            else:
+                print(f"✗ Failed to delete project API keys secret: {e}")
+                raise e
+        return
+
+    # Create or update the secret
+    try:
+        # Check if secret already exists
+        try:
+            existing_secret = core_v1.read_namespaced_secret(
+                name=api_keys_secret_name, namespace=namespace
+            )
+            print(f"ℹ Updating existing project API keys secret {api_keys_secret_name}")
+
+            # Update secret data
+            existing_secret.data = secret_data
+
+            core_v1.replace_namespaced_secret(
+                name=api_keys_secret_name, namespace=namespace, body=existing_secret
+            )
+            print(
+                f"✓ Updated project API keys secret {api_keys_secret_name} in namespace {namespace}"
+            )
+
+        except ApiException as e:
+            if e.status == 404:
+                # Secret doesn't exist, create it
+                secret_body = client.V1Secret(
+                    metadata=client.V1ObjectMeta(
+                        name=api_keys_secret_name,
+                        labels={
+                            "managed-by": "k8s-manager",
+                            "user-id": user_id,
+                            "project-id": project_id,
+                        },
+                    ),
+                    type="Opaque",
+                    data=secret_data,
+                )
+                core_v1.create_namespaced_secret(namespace=namespace, body=secret_body)
+                print(
+                    f"✓ Created project API keys secret {api_keys_secret_name} in namespace {namespace}"
+                )
+            else:
+                print(f"✗ Failed to update project API keys secret: {e}")
+                raise e
+    except Exception as e:
+        print(f"✗ Unexpected error updating project API keys secret: {e}")
+        raise e
+
+    # If project is active, restart the deployment to pick up new env vars
+    deployment_name = f"proj-{project_id}-api"
+    try:
+        deployment = apps_v1.read_namespaced_deployment(
+            name=deployment_name, namespace=namespace
+        )
+        if deployment.spec.replicas and deployment.spec.replicas > 0:
+            # Restart deployment by updating annotation
+            import time
+
+            if not deployment.spec.template.metadata.annotations:
+                deployment.spec.template.metadata.annotations = {}
+            deployment.spec.template.metadata.annotations[
+                "kubectl.kubernetes.io/restartedAt"
+            ] = str(int(time.time()))
+
+            apps_v1.patch_namespaced_deployment(
+                name=deployment_name, namespace=namespace, body=deployment
+            )
+            print(f"✓ Restarted deployment {deployment_name} to pick up new API keys")
+    except ApiException as e:
+        if e.status == 404:
+            print(f"ℹ Deployment {deployment_name} not found, skipping restart")
+        else:
+            print(f"⚠ Warning: Could not restart deployment {deployment_name}: {e}")
+    except Exception as e:
+        print(f"⚠ Warning: Unexpected error restarting deployment: {e}")
 
 
 def update_deployment_env_vars(user_id: str, project_id: str, env_vars: dict):
