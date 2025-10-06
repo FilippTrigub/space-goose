@@ -9,13 +9,10 @@ from models import (
     PodNotFoundException,
     ProjectCreate,
     ProjectUpdate,
-    Project,
     User,
     MessageRequest,
     SessionCreate,
-    Session,
     ProjectUpdateGitHubKey,
-    Extension,
     ExtensionCreate,
     ExtensionToggle,
     SettingUpdate,
@@ -27,13 +24,6 @@ from services import mongodb_service, k8s_service, auth_service
 from .utils import resolve_endpoint_info, target_and_headers, goose_request
 
 router = APIRouter()
-# Static user list for MVP
-users = [
-    {"id": "user1", "name": "User 1"},
-    {"id": "user2", "name": "User 2"},
-    {"id": "user3", "name": "FILIPP TEST USER"},
-]
-
 
 @router.get("/users", response_model=List[User], tags=["Users"])
 async def get_users():
@@ -46,12 +36,14 @@ async def get_users():
     Example:
         Returns static user list for MVP version
     """
+    existing_users = mongodb_service.get_users_collection().find({})
     return [
         User(
-            api_key=mongodb_service.get_user_api_key_plaintext(user["id"]),
-            **user
+            id=user["user_id"],
+            name=user['name'],
+            api_key=user.get('blackbox_api_key_plaintext')
         )
-        for user in users
+        for user in existing_users
     ]
 
 
