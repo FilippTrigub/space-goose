@@ -36,6 +36,7 @@ class Project(BaseModel):
 class User(BaseModel):
     id: str
     name: str
+    api_key: Optional[str] = None
 
 class ProjectUpdateGitHubKey(BaseModel):
     github_key: Optional[str] = None

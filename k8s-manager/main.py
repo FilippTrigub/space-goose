@@ -3,16 +3,17 @@
 
 import os
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi_mcp import FastApiMCP
+from fastapi_mcp import FastApiMCP, AuthConfig
 
 from dotenv import load_dotenv
 load_dotenv()
 
+from services import auth_service
 from routes import project_routes
 
 # Swagger UI Tags metadata
@@ -147,6 +148,7 @@ mcp = FastApiMCP(
         "reset_project_settings",
         "update_project_settings_in_bulk",
     ],
+    headers=["X-API-Key", "Authorization"],
 )
 mcp.mount_http()
 

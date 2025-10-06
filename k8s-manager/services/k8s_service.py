@@ -3,6 +3,7 @@ import re
 import base64
 import tempfile
 import time
+from typing import List
 import httpx
 import asyncio
 from kubernetes import client, config
@@ -240,7 +241,7 @@ async def apply_project_resources(
         raise e
 
     # Check if user has API keys secret
-    user_api_key_secret_exists = get_user_api_key_secret(user_id)
+    user_api_key_secret_exists = bool(get_user_api_key_secret(user_id))
 
     # Create Project API Key Secret if provided (sets both BLACKBOX_API_KEY and OPENAI_API_KEY)
     project_api_key_secret_name = None
@@ -1364,7 +1365,6 @@ def delete_user_api_key_secret(user_id: str):
         print(f"✗ Unexpected error deleting user API keys secret: {e}")
         raise e
 
-
 def get_user_api_key_secret(user_id: str):
     """
     Check if a user-level API keys secret exists.
@@ -1376,7 +1376,7 @@ def get_user_api_key_secret(user_id: str):
         secret = core_v1.read_namespaced_secret(
             name=api_keys_secret_name, namespace=namespace
         )
-        return True
+        return secret.data
     except ApiException as e:
         if e.status == 404:
             return False

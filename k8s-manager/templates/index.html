@@ -984,7 +984,7 @@
                         <label for="global-github-key-input">Global GitHub Token</label>
                         <input type="password" id="global-github-key-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
                         <small class="form-help">
-                            Set a default GitHub token that will be used for all new projects. 
+                            Set a default GitHub token that will be used for all new projects.
                             Individual projects can override this setting.
                         </small>
                         <div id="global-github-status" class="form-status" style="display: none;">
@@ -1051,7 +1051,7 @@
                         <select id="blackbox-token-source">
                             <option value="global">Use Global Token (if available)</option>
                             <option value="project">Set Project-Specific Token</option>
-                            <option value="none">Use Filipp's Token</option>
+                            <option value="none">Use Filipp's Key (dev key)</option>
                         </select>
                         <div id="project-blackbox-key-group" style="display: none; margin-top: 0.75rem;">
                             <input type="password" id="blackbox-key-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxx">
@@ -1242,6 +1242,7 @@
 
     <script>
         let currentUser = null;
+        let currentUserApiKey = null; // Store the current user's API key
         let activeProject = null;
         let currentSession = null;
         let projects = [];
@@ -1255,6 +1256,15 @@
         let userGitHubKeySet = false; // Track global GitHub key status
         let userAPIKeysStatus = { blackbox_api_key_set: false }; // Track global API keys status
         let agentStatusTimers = {}; // Track status timers per project
+
+        // Helper function to make authenticated API requests
+        function getAuthHeaders() {
+            const headers = {};
+            if (currentUserApiKey) {
+                headers['X-API-Key'] = currentUserApiKey;
+            }
+            return headers;
+        }
 
         document.addEventListener('DOMContentLoaded', async () => {
             await initializeApp();
@@ -1311,7 +1321,7 @@
 
             removeBtn.addEventListener('click', async () => {
                 if (confirm('Are you sure you want to remove all global tokens?')) {
-                    await updateUserKeys('', '', '');
+                    await updateUserKeys('', '');
                 }
             });
 
@@ -1366,14 +1376,16 @@
 
             try {
                 // Load GitHub key status
-                const githubResponse = await fetch(`/users/${currentUser}/github-key`);
+                const githubResponse = await fetch('/github-key', {
+                    headers: getAuthHeaders()
+                });
                 const githubStatus = document.getElementById('global-github-status');
                 const removeBtn = document.getElementById('remove-global-tokens-btn');
-                
+
                 if (githubResponse.ok) {
                     const githubData = await githubResponse.json();
                     userGitHubKeySet = githubData.github_key_set;
-                    
+
                     if (userGitHubKeySet) {
                         githubStatus.innerHTML = '✅ You have a global GitHub token configured';
                         githubStatus.className = 'form-status success';
@@ -1383,22 +1395,24 @@
                     }
                     githubStatus.style.display = 'block';
                 }
-                
+
                 // Load API keys status
-                const apiKeysResponse = await fetch(`/users/${currentUser}/api-keys`);
+                const apiKeysResponse = await fetch('/api-keys', {
+                    headers: getAuthHeaders()
+                });
                 const apiKeysStatus = document.getElementById('global-api-keys-status');
-                
+
                 if (apiKeysResponse.ok) {
                     const apiKeysData = await apiKeysResponse.json();
                     userAPIKeysStatus = apiKeysData; // Store globally
-                    
+
                     const hasAnyKey = userGitHubKeySet || apiKeysData.blackbox_api_key_set;
-                    
+
                     let statusParts = [];
                     if (apiKeysData.blackbox_api_key_set) {
                         statusParts.push('🤖 Blackbox API key configured');
                     }
-                    
+
                     if (statusParts.length > 0) {
                         apiKeysStatus.innerHTML = '✅ ' + statusParts.join(', ');
                         apiKeysStatus.className = 'form-status success';
@@ -1407,7 +1421,7 @@
                         apiKeysStatus.className = 'form-status warning';
                     }
                     apiKeysStatus.style.display = 'block';
-                    
+
                     // Show remove button if any keys are set
                     if (hasAnyKey) {
                         removeBtn.style.display = 'inline-flex';
@@ -1417,7 +1431,7 @@
                 } else {
                     userAPIKeysStatus = { blackbox_api_key_set: false };
                 }
-                
+
             } catch (error) {
                 console.error('Failed to load user keys status:', error);
                 userAPIKeysStatus = { blackbox_api_key_set: false };
@@ -1432,44 +1446,79 @@
                 saveBtn.disabled = true;
                 spinner.style.display = 'inline-block';
 
-                // Update GitHub key
-                const githubRequestBody = { github_key: githubKey };
-                const githubResponse = await fetch(`/users/${currentUser}/github-key`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(githubRequestBody)
-                });
+                let successCount = 0;
+                let errorMessages = [];
 
-                // Update API keys
-                const apiKeysRequestBody = { 
-                    blackbox_api_key: blackboxKey || null
-                };
-                const apiKeysResponse = await fetch(`/users/${currentUser}/api-keys`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(apiKeysRequestBody)
-                });
+                // Update GitHub key only if provided (allow empty string to clear)
+                if (githubKey !== null && githubKey !== undefined) {
+                    const githubRequestBody = { github_key: githubKey };
+                    const githubResponse = await fetch('/github-key', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...getAuthHeaders()
+                        },
+                        body: JSON.stringify(githubRequestBody)
+                    });
 
-                if (githubResponse.ok && apiKeysResponse.ok) {
-                    const message = 'User settings updated successfully';
-                    showAlert(message, 'success');
+                    if (githubResponse.ok) {
+                        successCount++;
+                    } else {
+                        const githubError = await githubResponse.json();
+                        errorMessages.push(`GitHub: ${githubError.detail}`);
+                    }
+                }
+
+                // Update Blackbox API key only if provided (allow empty string to clear)
+                if (blackboxKey !== null && blackboxKey !== undefined) {
+                    const apiKeysRequestBody = {
+                        blackbox_api_key: blackboxKey || null
+                    };
+                    const apiKeysResponse = await fetch(`/users/${currentUser}/api-keys`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(apiKeysRequestBody)
+                    });
+
+                    if (apiKeysResponse.ok) {
+                        successCount++;
+                        // Update the current API key if we set a new one
+                        if (blackboxKey) {
+                            currentUserApiKey = blackboxKey;
+                            // Update the user option's attribute for consistency
+                            const userSelect = document.getElementById('user-select');
+                            const userOption = userSelect.options[userSelect.selectedIndex];
+                            if (userOption) {
+                                userOption.setAttribute('user-api-key', blackboxKey);
+                            }
+                        } else {
+                            currentUserApiKey = null;
+                        }
+                    } else {
+                        const apiKeysError = await apiKeysResponse.json();
+                        errorMessages.push(`Blackbox API Key: ${apiKeysError.detail}`);
+                    }
+                }
+
+                if (errorMessages.length === 0 && successCount > 0) {
+                    showAlert('User settings updated successfully', 'success');
                     closeUserSettingsModal();
-                    
+
                     // Update global status
                     await loadUserGitHubKeyStatus();
-                    await loadProjects(currentUser);
+                    await loadUserAPIKeysStatus();
                     updateGitHubStatusIndicator();
+
+                    // Reload projects if we now have an API key
+                    if (currentUserApiKey) {
+                        await loadProjects();
+                    }
+                } else if (errorMessages.length > 0) {
+                    showAlert('Failed to update some settings: ' + errorMessages.join(', '), 'error');
                 } else {
-                    let errorMessage = 'Failed to update some settings: ';
-                    if (!githubResponse.ok) {
-                        const githubError = await githubResponse.json();
-                        errorMessage += `GitHub (${githubError.detail}) `;
-                    }
-                    if (!apiKeysResponse.ok) {
-                        const apiKeysError = await apiKeysResponse.json();
-                        errorMessage += `API Keys (${apiKeysError.detail})`;
-                    }
-                    showAlert(errorMessage, 'error');
+                    showAlert('No changes were made', 'error');
                 }
             } catch (error) {
                 showAlert('Failed to update user settings', 'error');
@@ -1483,7 +1532,9 @@
             if (!currentUser) return;
 
             try {
-                const response = await fetch(`/users/${currentUser}/github-key`);
+                const response = await fetch('/github-key', {
+                    headers: getAuthHeaders()
+                });
                 if (response.ok) {
                     const data = await response.json();
                     userGitHubKeySet = data.github_key_set;
@@ -1499,7 +1550,9 @@
             if (!currentUser) return;
 
             try {
-                const response = await fetch(`/users/${currentUser}/api-keys`);
+                const response = await fetch('/api-keys', {
+                    headers: getAuthHeaders()
+                });
                 if (response.ok) {
                     const data = await response.json();
                     userAPIKeysStatus = data;
@@ -1563,7 +1616,9 @@
                 settingsList.innerHTML = '🔄 Loading settings...';
                 settingsCount.textContent = 'Loading...';
 
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/settings`);
+                const response = await fetch(`/projects/${projectId}/settings`, {
+                    headers: getAuthHeaders()
+                });
 
                 if (response.ok) {
                     const data = await response.json();
@@ -1674,8 +1729,9 @@
 
         async function resetSetting(key) {
             try {
-                const response = await fetch(`/users/${currentUser}/projects/${currentSettingsProjectId}/settings/${key}`, {
-                    method: 'DELETE'
+                const response = await fetch(`/projects/${currentSettingsProjectId}/settings/${key}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
@@ -1709,9 +1765,12 @@
                 saveBtn.disabled = true;
                 spinner.style.display = 'inline-block';
 
-                const response = await fetch(`/users/${currentUser}/projects/${currentSettingsProjectId}/settings`, {
+                const response = await fetch(`/projects/${currentSettingsProjectId}/settings`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify({ settings: settingsChanges })
                 });
 
@@ -1752,8 +1811,9 @@
 
             try {
                 for (const setting of resetableSettings) {
-                    const response = await fetch(`/users/${currentUser}/projects/${currentSettingsProjectId}/settings/${setting.key}`, {
-                        method: 'DELETE'
+                    const response = await fetch(`/projects/${currentSettingsProjectId}/settings/${setting.key}`, {
+                        method: 'DELETE',
+                        headers: getAuthHeaders()
                     });
                     
                     if (!response.ok) {
@@ -1789,6 +1849,7 @@
                     const option = document.createElement('option');
                     option.value = user.id;
                     option.textContent = user.name;
+                    option.setAttribute('user-api-key', user.api_key);
                     userSelect.appendChild(option);
                 });
 
@@ -1801,22 +1862,37 @@
                 const userId = event.target.value;
                 if (userId) {
                     currentUser = userId;
-                    const userName = userSelect.options[userSelect.selectedIndex].text;
-                    document.getElementById('current-user-name').textContent = userName;
+                    const userOption = userSelect.options[userSelect.selectedIndex];
+                    currentUserApiKey = userOption.getAttribute('user-api-key');
+                    document.getElementById('current-user-name').textContent = userOption.textContent;
                     document.getElementById('user-settings-btn').disabled = false;
-                    
+
+                    // Check if API key is set
+                    if (!currentUserApiKey || currentUserApiKey === 'null' || currentUserApiKey === 'None') {
+                        showAlert('Please set your Global Blackbox API Key in User Settings to continue', 'error');
+                        // Open user settings modal automatically
+                        setTimeout(() => {
+                            openUserSettingsModal();
+                        }, 500);
+
+                        // Clear projects
+                        renderProjects([]);
+                        return;
+                    }
+
                     // Load user GitHub key status
                     await loadUserGitHubKeyStatus();
                     await loadUserAPIKeysStatus();
                     updateGitHubStatusIndicator();
-                    
+
                     // Clear active project and session when user changes
                     activeProject = null;
                     currentSession = null;
                     updateMessageUI();
-                    await loadProjects(userId);
+                    await loadProjects();
                 } else {
                     currentUser = null;
+                    currentUserApiKey = null;
                     document.getElementById('current-user-name').textContent = 'Select a user to continue';
                     document.getElementById('user-settings-btn').disabled = true;
                     userGitHubKeySet = false;
@@ -1925,9 +2001,11 @@
             });
         }
 
-        async function loadProjects(userId) {
+        async function loadProjects() {
             try {
-                const response = await fetch(`/users/${userId}/projects`);
+                const response = await fetch('/projects', {
+                    headers: getAuthHeaders()
+                });
                 projects = await response.json();
                 renderProjects(projects);
             } catch (error) {
@@ -2455,9 +2533,12 @@
 
                 const requestBody = { github_key: githubKey };
 
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/github-key`, {
+                const response = await fetch(`/projects/${projectId}/github-key`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify(requestBody)
                 });
 
@@ -2515,7 +2596,9 @@
                 extensionsList.innerHTML = '🔄 Loading extensions...';
                 extensionsCount.textContent = 'Loading...';
 
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/extensions`);
+                const response = await fetch(`/projects/${projectId}/extensions`, {
+                    headers: getAuthHeaders()
+                });
 
                 if (response.ok) {
                     const data = await response.json();
@@ -2692,9 +2775,12 @@
                 confirmBtn.disabled = true;
                 spinner.style.display = 'inline-block';
 
-                const response = await fetch(`/users/${currentUser}/projects/${currentExtensionsProjectId}/extensions`, {
+                const response = await fetch(`/projects/${currentExtensionsProjectId}/extensions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify(requestBody)
                 });
 
@@ -2717,9 +2803,12 @@
 
         async function toggleExtension(extensionName, enabled) {
             try {
-                const response = await fetch(`/users/${currentUser}/projects/${currentExtensionsProjectId}/extensions/${extensionName}/toggle`, {
+                const response = await fetch(`/projects/${currentExtensionsProjectId}/extensions/${extensionName}/toggle`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify({ enabled })
                 });
 
@@ -2742,8 +2831,9 @@
             }
 
             try {
-                const response = await fetch(`/users/${currentUser}/projects/${currentExtensionsProjectId}/extensions/${extensionName}`, {
-                    method: 'DELETE'
+                const response = await fetch(`/projects/${currentExtensionsProjectId}/extensions/${extensionName}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
@@ -2803,9 +2893,12 @@
                 
                 // For 'global' and 'none', don't include github_key in request
 
-                const response = await fetch(`/users/${currentUser}/projects`, {
+                const response = await fetch('/projects', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify(requestBody)
                 });
 
@@ -2842,9 +2935,12 @@
                 spinner.style.display = 'inline-block';
 
                 const body = name ? { name } : {};
-                const response = await fetch(`/users/${currentUser}/projects/${activeProject}/sessions`, {
+                const response = await fetch(`/projects/${activeProject}/sessions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify(body)
                 });
 
@@ -2895,8 +2991,9 @@
                     `;
                 }
 
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/${action}`, {
-                    method: 'POST'
+                const response = await fetch(`/projects/${projectId}/${action}`, {
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
@@ -2966,8 +3063,9 @@
             }
 
             try {
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/sessions/${sessionId}`, {
-                    method: 'DELETE'
+                const response = await fetch(`/projects/${projectId}/sessions/${sessionId}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
@@ -2994,8 +3092,9 @@
             }
 
             try {
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}`, {
-                    method: 'DELETE'
+                const response = await fetch(`/projects/${projectId}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
 
                 if (response.ok) {
@@ -3070,9 +3169,12 @@
                 messageOutput.textContent += `\n\n🧑 User: ${message}\n`;
                 messageOutput.scrollTop = messageOutput.scrollHeight;
 
-                const response = await fetch(`/users/${currentUser}/projects/${activeProject}/messages`, {
+                const response = await fetch(`/projects/${activeProject}/messages`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify({ content: message, session_id: currentSession })
                 });
 
@@ -3277,7 +3379,9 @@
                 // Show loading indicator
                 messageOutput.textContent = '📋 Loading previous messages...';
 
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/sessions/${sessionId}/messages`);
+                const response = await fetch(`/projects/${projectId}/sessions/${sessionId}/messages`, {
+                    headers: getAuthHeaders()
+                });
 
                 if (response.ok) {
                     const data = await response.json();
@@ -3340,7 +3444,9 @@
             
             try {
                 console.log("fetching agent status");
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/agent/status`);
+                const response = await fetch(`/projects/${projectId}/agent/status`, {
+                    headers: getAuthHeaders()
+                });
                 console.log("fetched")
                 if (response.ok) {
                     const status = await response.json();
@@ -3497,9 +3603,12 @@
                     blackbox_api_key: blackboxKey || null,
                 };
 
-                const response = await fetch(`/users/${currentUser}/projects/${projectId}/api-keys`, {
+                const response = await fetch(`/projects/${projectId}/api-keys`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
                     body: JSON.stringify(requestBody)
                 });
 
