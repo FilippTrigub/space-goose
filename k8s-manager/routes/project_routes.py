@@ -3,7 +3,6 @@ from fastapi.responses import StreamingResponse
 from typing import List
 import json
 import httpx
-import asyncio
 from datetime import datetime
 
 from models import (
