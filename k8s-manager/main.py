@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi_mcp import FastApiMCP, AuthConfig
+from fastapi_mcp import FastApiMCP
 
 from dotenv import load_dotenv
 load_dotenv()
