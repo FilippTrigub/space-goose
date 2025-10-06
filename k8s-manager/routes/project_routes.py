@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from typing import List
+from typing import List, Optional
 import json
 import httpx
 from datetime import datetime
@@ -23,11 +23,10 @@ from models import (
     UserAPIKeys,
     ProjectUpdateAPIKeys,
 )
-from services import mongodb_service, k8s_service
+from services import mongodb_service, k8s_service, auth_service
 from .utils import resolve_endpoint_info, target_and_headers, goose_request
 
 router = APIRouter()
-
 # Static user list for MVP
 users = [
     {"id": "user1", "name": "User 1"},
@@ -47,18 +46,24 @@ async def get_users():
     Example:
         Returns static user list for MVP version
     """
-    return [User(**user) for user in users]
+    return [
+        User(
+            api_key=mongodb_service.get_user_api_key_plaintext(user["id"]),
+            **user
+        )
+        for user in users
+    ]
 
 
 @router.get(
-    "/users/{user_id}/projects", operation_id="get_user_projects", tags=["Projects"]
+    "/projects", operation_id="get_user_projects", tags=["Projects"]
 )
-async def get_projects(user_id: str):
+async def get_projects(user_id: str = Depends(auth_service.get_current_user)):
     """
-    Get all projects for a specific user.
+    Get all projects for the authenticated user.
 
     Args:
-        user_id (str): The ID of the user to fetch projects for
+        user_id (str): The ID of the user (extracted from API key header)
 
     Returns:
         List[dict]: A list of project dictionaries containing project details
@@ -75,10 +80,10 @@ async def get_projects(user_id: str):
             - updated_at: Last update timestamp
 
     Raises:
-        HTTPException: Not explicitly raised but could be from the database service
+        HTTPException: 401 if API key is invalid
 
     Example:
-        Retrieves all projects from MongoDB for the specified user
+        Retrieves all projects from MongoDB for the authenticated user
     """
     projects = mongodb_service.list_projects(user_id)
     return [
@@ -103,9 +108,9 @@ async def get_projects(user_id: str):
 
 
 @router.post(
-    "/users/{user_id}/projects", operation_id="create_project", tags=["Projects"]
+    "/projects", operation_id="create_project", tags=["Projects"]
 )
-async def create_project(user_id: str, project: ProjectCreate):
+async def create_project(project: ProjectCreate, user_id: str = Depends(auth_service.get_current_user)):
     """
     Create a new project with Kubernetes resources.
 
@@ -223,11 +228,11 @@ async def create_project(user_id: str, project: ProjectCreate):
 
 
 @router.put(
-    "/users/{user_id}/projects/{project_id}",
+    "/projects/{project_id}",
     operation_id="update_project",
     tags=["Projects"],
 )
-async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
+async def update_project(project_id: str, project: ProjectUpdate, user_id: str = Depends(auth_service.get_current_user)):
     """
     Update an existing project's name and metadata.
 
@@ -256,11 +261,11 @@ async def update_project(user_id: str, project_id: str, project: ProjectUpdate):
 
 
 @router.delete(
-    "/users/{user_id}/projects/{project_id}",
+    "/projects/{project_id}",
     operation_id="delete_project",
     tags=["Projects"],
 )
-async def delete_project(user_id: str, project_id: str):
+async def delete_project(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """
     Delete a project and all its associated Kubernetes resources.
 
@@ -301,11 +306,11 @@ async def delete_project(user_id: str, project_id: str):
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/activate",
+    "/projects/{project_id}/activate",
     operation_id="activate_project",
     tags=["Projects"],
 )
-async def activate_project(user_id: str, project_id: str):
+async def activate_project(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """
     Activate a project by scaling up its deployment and retrieving the endpoint.
 
@@ -376,11 +381,11 @@ async def activate_project(user_id: str, project_id: str):
 
 # New endpoint for manual repository cloning
 @router.post(
-    "/users/{user_id}/projects/{project_id}/clone-repository",
+    "/projects/{project_id}/clone-repository",
     operation_id="clone_repository",
     tags=["Projects"],
 )
-async def clone_repository(user_id: str, project_id: str):
+async def clone_repository(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """
     Manually clone the repository for an active project.
     """
@@ -429,12 +434,12 @@ async def clone_repository(user_id: str, project_id: str):
 
 
 @router.put(
-    "/users/{user_id}/projects/{project_id}/github-key",
+    "/projects/{project_id}/github-key",
     operation_id="update_project_github_key",
     tags=["GitHub Integration"],
 )
 async def update_project_github_key(
-    user_id: str, project_id: str, github_key_data: ProjectUpdateGitHubKey
+    project_id: str, github_key_data: ProjectUpdateGitHubKey, user_id: str = Depends(auth_service.get_current_user)
 ):
     """Update GitHub key for an existing project"""
     # Check if project exists
@@ -485,11 +490,11 @@ async def update_project_github_key(
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/deactivate",
+    "/projects/{project_id}/deactivate",
     operation_id="deactivate_project",
     tags=["Projects"],
 )
-async def deactivate_project(user_id: str, project_id: str):
+async def deactivate_project(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """
     Deactivate a project by scaling down its deployment.
 
@@ -524,11 +529,11 @@ async def deactivate_project(user_id: str, project_id: str):
 
 # New user GitHub token endpoints
 @router.put(
-    "/users/{user_id}/github-key",
+    "/github-key",
     operation_id="update_user_github_key",
     tags=["GitHub Integration"],
 )
-async def update_user_github_key(user_id: str, github_key_data: UserGitHubKey):
+async def update_user_github_key(github_key_data: UserGitHubKey, user_id: str = Depends(auth_service.get_current_user)):
     """Set or update the global GitHub key for a user"""
     try:
         # First store in K8s as secret
@@ -583,11 +588,11 @@ async def update_user_github_key(user_id: str, github_key_data: UserGitHubKey):
 
 
 @router.get(
-    "/users/{user_id}/github-key",
+    "/github-key",
     operation_id="check_user_github_key",
     tags=["GitHub Integration"],
 )
-async def check_user_github_key(user_id: str):
+async def check_user_github_key(user_id: str = Depends(auth_service.get_current_user)):
     """Check if a user has a global GitHub key set"""
     try:
         # Check MongoDB for user
@@ -600,11 +605,11 @@ async def check_user_github_key(user_id: str):
 
 
 @router.delete(
-    "/users/{user_id}/github-key",
+    "/github-key",
     operation_id="delete_user_github_key",
     tags=["GitHub Integration"],
 )
-async def delete_user_github_key(user_id: str):
+async def delete_user_github_key(user_id: str = Depends(auth_service.get_current_user)):
     """Remove the global GitHub key for a user"""
     try:
         # Remove from K8s
@@ -635,8 +640,6 @@ async def delete_user_github_key(user_id: str):
 
 
 # API Keys Management Endpoints
-
-
 @router.put(
     "/users/{user_id}/api-keys", operation_id="update_user_api_keys", tags=["API Keys"]
 )
@@ -694,9 +697,9 @@ async def update_user_api_key(user_id: str, api_keys_data: UserAPIKeys):
 
 
 @router.get(
-    "/users/{user_id}/api-keys", operation_id="check_user_api_keys", tags=["API Keys"]
+    "/api-keys", operation_id="check_user_api_keys", tags=["API Keys"]
 )
-async def check_user_api_key(user_id: str):
+async def check_user_api_key(user_id: str = Depends(auth_service.get_current_user)):
     """Check if a user has API keys set"""
     try:
         # Check MongoDB for user
@@ -709,9 +712,9 @@ async def check_user_api_key(user_id: str):
 
 
 @router.delete(
-    "/users/{user_id}/api-keys", operation_id="delete_user_api_keys", tags=["API Keys"]
+    "/api-keys", operation_id="delete_user_api_keys", tags=["API Keys"]
 )
-async def delete_user_api_key(user_id: str):
+async def delete_user_api_key(user_id: str = Depends(auth_service.get_current_user)):
     """Remove the global API keys for a user"""
     try:
         # Remove from K8s
@@ -739,12 +742,12 @@ async def delete_user_api_key(user_id: str):
 
 
 @router.put(
-    "/users/{user_id}/projects/{project_id}/api-keys",
+    "/projects/{project_id}/api-keys",
     operation_id="update_project_api_keys",
     tags=["API Keys"],
 )
 async def update_project_api_key(
-    user_id: str, project_id: str, api_keys_data: ProjectUpdateAPIKeys
+    project_id: str, api_keys_data: ProjectUpdateAPIKeys, user_id: str = Depends(auth_service.get_current_user)
 ):
     """Update API keys for an existing project"""
     # Check if project exists
@@ -792,11 +795,11 @@ async def update_project_api_key(
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/sessions",
+    "/projects/{project_id}/sessions",
     operation_id="create_session",
     tags=["Sessions"],
 )
-async def create_session(user_id: str, project_id: str, session: SessionCreate):
+async def create_session(project_id: str, session: SessionCreate, user_id: str = Depends(auth_service.get_current_user)):
     """Create a new session in the Goose API and store it in the project"""
     # Check if project exists and is active
     project = mongodb_service.get_project(project_id)
@@ -850,11 +853,11 @@ async def create_session(user_id: str, project_id: str, session: SessionCreate):
 
 
 @router.get(
-    "/users/{user_id}/projects/{project_id}/sessions",
+    "/projects/{project_id}/sessions",
     operation_id="get_all_project_sessions",
     tags=["Sessions"],
 )
-async def get_project_sessions(user_id: str, project_id: str):
+async def get_project_sessions(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """Get all sessions for a project"""
     print(f"getting session with user {user_id} and project {project_id}")
     project = mongodb_service.get_project(project_id)
@@ -865,9 +868,9 @@ async def get_project_sessions(user_id: str, project_id: str):
 
 
 @router.delete(
-    "/users/{user_id}/projects/{project_id}/sessions/{session_id}", tags=["Sessions"]
+    "/projects/{project_id}/sessions/{session_id}", tags=["Sessions"]
 )
-async def delete_session(user_id: str, project_id: str, session_id: str):
+async def delete_session(project_id: str, session_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """Delete a session from both Goose API and project data"""
     project = mongodb_service.get_project(project_id)
     if not project:
@@ -898,11 +901,11 @@ async def delete_session(user_id: str, project_id: str, session_id: str):
 
 
 @router.get(
-    "/users/{user_id}/projects/{project_id}/sessions/{session_id}/messages",
+    "/projects/{project_id}/sessions/{session_id}/messages",
     operation_id="get_session_messages",
     tags=["Sessions"],
 )
-async def get_session_messages(user_id: str, project_id: str, session_id: str):
+async def get_session_messages(project_id: str, session_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """Get message history for a session"""
     # Check if project exists and user has access
     project = mongodb_service.get_project(project_id)
@@ -959,8 +962,8 @@ async def get_session_messages(user_id: str, project_id: str, session_id: str):
 # Extension Management Endpoints
 
 
-@router.get("/users/{user_id}/projects/{project_id}/extensions", tags=["Extensions"])
-async def get_project_extensions(user_id: str, project_id: str):
+@router.get("/projects/{project_id}/extensions", tags=["Extensions"])
+async def get_project_extensions(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """Get all extensions for a project"""
     project = mongodb_service.get_project(project_id)
     if not project:
@@ -1002,9 +1005,9 @@ async def get_project_extensions(user_id: str, project_id: str):
         )
 
 
-@router.post("/users/{user_id}/projects/{project_id}/extensions", tags=["Extensions"])
+@router.post("/projects/{project_id}/extensions", tags=["Extensions"])
 async def create_project_extension(
-    user_id: str, project_id: str, extension: ExtensionCreate
+    project_id: str, extension: ExtensionCreate, user_id: str = Depends(auth_service.get_current_user)
 ):
     """Create a new extension for a project"""
     project = mongodb_service.get_project(project_id)
@@ -1107,11 +1110,11 @@ async def update_project_env_vars(user_id: str, project_id: str, env_vars: dict)
 
 
 @router.put(
-    "/users/{user_id}/projects/{project_id}/extensions/{extension_name}/toggle",
+    "/projects/{project_id}/extensions/{extension_name}/toggle",
     tags=["Extensions"],
 )
 async def toggle_project_extension(
-    user_id: str, project_id: str, extension_name: str, toggle_data: ExtensionToggle
+    project_id: str, extension_name: str, toggle_data: ExtensionToggle, user_id: str = Depends(auth_service.get_current_user)
 ):
     """Toggle extension enabled/disabled for a project"""
     project = mongodb_service.get_project(project_id)
@@ -1170,10 +1173,10 @@ async def toggle_project_extension(
 
 
 @router.delete(
-    "/users/{user_id}/projects/{project_id}/extensions/{extension_name}",
+    "/projects/{project_id}/extensions/{extension_name}",
     tags=["Extensions"],
 )
-async def delete_project_extension(user_id: str, project_id: str, extension_name: str):
+async def delete_project_extension(project_id: str, extension_name: str, user_id: str = Depends(auth_service.get_current_user)):
     """Delete an extension from a project"""
     project = mongodb_service.get_project(project_id)
     if not project:
@@ -1238,11 +1241,11 @@ async def delete_project_extension(user_id: str, project_id: str, extension_name
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/messages",
+    "/projects/{project_id}/messages",
     operation_id="send_message",
     tags=["Messaging"],
 )
-async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
+async def proxy_message(project_id: str, message: MessageRequest, user_id: str = Depends(auth_service.get_current_user)):
     """Send message to a specific session and stream the response"""
     # Get project to check if active
     project = mongodb_service.get_project(project_id)
@@ -1323,11 +1326,11 @@ async def proxy_message(user_id: str, project_id: str, message: MessageRequest):
 
 
 @router.post(
-    "/users/{user_id}/projects/{project_id}/messages/send",
+    "/projects/{project_id}/messages/send",
     operation_id="send_message_fire_and_forget",
     tags=["Messaging"],
 )
-async def send_message_sync(user_id: str, project_id: str, message: MessageRequest):
+async def send_message_sync(project_id: str, message: MessageRequest, user_id: str = Depends(auth_service.get_current_user)):
     """
     Send message to a specific session without streaming (fire-and-forget).
 
@@ -1417,11 +1420,11 @@ async def send_message_sync(user_id: str, project_id: str, message: MessageReque
 
 
 @router.get(
-    "/users/{user_id}/projects/{project_id}/settings",
+    "/projects/{project_id}/settings",
     operation_id="get_all_project_settings",
     tags=["Settings"],
 )
-async def get_project_settings(user_id: str, project_id: str):
+async def get_project_settings(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """Get all settings for a project"""
     project = mongodb_service.get_project(project_id)
     if not project:
@@ -1464,11 +1467,11 @@ async def get_project_settings(user_id: str, project_id: str):
 
 
 @router.get(
-    "/users/{user_id}/projects/{project_id}/settings/{setting_key}",
+    "/projects/{project_id}/settings/{setting_key}",
     operation_id="get_specific_project_setting",
     tags=["Settings"],
 )
-async def get_project_setting(user_id: str, project_id: str, setting_key: str):
+async def get_project_setting(project_id: str, setting_key: str, user_id: str = Depends(auth_service.get_current_user)):
     """Get a specific setting for a project"""
     project = mongodb_service.get_project(project_id)
     if not project:
@@ -1516,12 +1519,12 @@ async def get_project_setting(user_id: str, project_id: str, setting_key: str):
 
 
 @router.put(
-    "/users/{user_id}/projects/{project_id}/settings/{setting_key}",
+    "/projects/{project_id}/settings/{setting_key}",
     operation_id="update_project_setting",
     tags=["Settings"],
 )
 async def update_project_setting(
-    user_id: str, project_id: str, setting_key: str, setting_data: SettingUpdate
+    project_id: str, setting_key: str, setting_data: SettingUpdate, user_id: str = Depends(auth_service.get_current_user)
 ):
     """Update a specific setting for a project"""
     project = mongodb_service.get_project(project_id)
@@ -1594,11 +1597,11 @@ async def update_project_setting(
 
 
 @router.delete(
-    "/users/{user_id}/projects/{project_id}/settings/{setting_key}",
+    "/projects/{project_id}/settings/{setting_key}",
     operation_id="reset_project_settings",
     tags=["Settings"],
 )
-async def reset_project_setting(user_id: str, project_id: str, setting_key: str):
+async def reset_project_setting(project_id: str, setting_key: str, user_id: str = Depends(auth_service.get_current_user)):
     """Reset a setting to its default value for a project"""
     project = mongodb_service.get_project(project_id)
     if not project:
@@ -1667,12 +1670,12 @@ async def reset_project_setting(user_id: str, project_id: str, setting_key: str)
 
 
 @router.put(
-    "/users/{user_id}/projects/{project_id}/settings",
+    "/projects/{project_id}/settings",
     operation_id="update_project_settings_in_bulk",
     tags=["Settings"],
 )
 async def update_project_settings_bulk(
-    user_id: str, project_id: str, settings_data: dict
+    project_id: str, settings_data: dict, user_id: str = Depends(auth_service.get_current_user)
 ):
     """Bulk update multiple settings for a project"""
     project = mongodb_service.get_project(project_id)
@@ -1730,11 +1733,11 @@ async def update_project_settings_bulk(
 
 
 @router.get(
-    "/users/{user_id}/projects/{project_id}/agent/status",
+    "/projects/{project_id}/agent/status",
     operation_id="get_agent_status",
     tags=["Agent Status"],
 )
-async def get_agent_status(user_id: str, project_id: str):
+async def get_agent_status(project_id: str, user_id: str = Depends(auth_service.get_current_user)):
     """Get the current status of the AI agent for a project"""
     project = mongodb_service.get_project(project_id)
     if not project:

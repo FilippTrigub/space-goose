@@ -152,6 +152,11 @@ def get_user(user_id: str):
     return get_users_collection().find_one({"user_id": user_id})
 
 
+def get_user_by_api_key(api_key: str):
+    """Get user document from MongoDB by API key"""
+    return get_users_collection().find_one({"blackbox_api_key_plaintext": api_key})
+
+
 def ensure_user_exists(user_id: str, user_name: str = None):
     """Ensure user exists in the users collection"""
     existing_user = get_user(user_id)
@@ -212,10 +217,8 @@ def has_user_github_key(user_id: str):
 
 
 # API Key functions for users and projects (Corrected: Only BLACKBOX_API_KEY)
-
-
 def store_user_api_key(user_id: str, blackbox_key: str = None):
-    """Store Blackbox API key for a user (masked for security)"""
+    """Store Blackbox API key for a user"""
     # Ensure user exists
     ensure_user_exists(user_id)
 
@@ -230,6 +233,8 @@ def store_user_api_key(user_id: str, blackbox_key: str = None):
         )
         update_data["blackbox_api_key_masked"] = masked_key
         update_data["blackbox_api_key_set"] = True
+        # TODO: Remove this later
+        update_data["blackbox_api_key_plaintext"] = blackbox_key
     else:
         update_data["blackbox_api_key_set"] = False
 
@@ -243,7 +248,7 @@ def delete_user_api_key(user_id: str):
     return get_users_collection().update_one(
         {"user_id": user_id},
         {
-            "$unset": {"blackbox_api_key_masked": ""},
+            "$unset": {"blackbox_api_key_masked": "", "blackbox_api_key_plaintext": ""},
             "$set": {"blackbox_api_key_set": False, "updated_at": datetime.utcnow()},
         },
     )
@@ -256,6 +261,15 @@ def has_user_api_key(user_id: str):
         return {"blackbox_api_key_set": False}
 
     return {"blackbox_api_key_set": user.get("blackbox_api_key_set", False)}
+
+
+def get_user_api_key_plaintext(user_id: str):
+    """Get plaintext Blackbox API key for a user (MVP only - TODO: Remove this)"""
+    user = get_user(user_id)
+    if not user:
+        return None
+
+    return user.get("blackbox_api_key_plaintext")
 
 
 def store_project_api_key(project_id: str, blackbox_key: str = None):
