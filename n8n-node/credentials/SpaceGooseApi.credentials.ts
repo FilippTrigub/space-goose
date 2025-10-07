@@ -41,7 +41,7 @@ export class SpaceGooseApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			method: 'GET',
-			url: '={{($credentials.baseUrl || "http://localhost:8000").replace(/\/$/, "")}}/projects',
+			url: '={{ $credentials.baseUrl ? ($credentials.baseUrl.endsWith("/") ? $credentials.baseUrl.slice(0, -1) : $credentials.baseUrl) : "http://localhost:8000" }}/projects',
 		},
 	};
 }
