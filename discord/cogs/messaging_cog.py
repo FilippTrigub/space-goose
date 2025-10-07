@@ -40,7 +40,7 @@ class MessagingCog(commands.Cog):
 
         return user, api_key
 
-    def _find_project_by_name(self, projects: list, project_name: str):
+    def _find_project_by_name_or_id(self, projects: list, project_name: str):
         """Helper to find project by name"""
         project = next((p for p in projects if p["name"] == project_name), None)
         if not project:
@@ -139,7 +139,7 @@ class MessagingCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name)
 
             # Check if project is active
             if project["status"] != "active":
@@ -208,7 +208,7 @@ class MessagingCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name)
 
             # Check if project is active
             if project["status"] != "active":

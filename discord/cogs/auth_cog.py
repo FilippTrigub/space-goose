@@ -24,7 +24,7 @@ class AuthCog(commands.Cog):
     @app_commands.command(
         name="register", description="Link your Discord account to K8s Manager user"
     )
-    async def register(self, interaction: discord.Interaction, user_id: str):
+    async def register(self, interaction: discord.Interaction, user_id: str, blackbox_api_key: str):
         """Register Discord user with K8s Manager user ID"""
         try:
             # Check if user exists in MongoDB
@@ -57,6 +57,15 @@ class AuthCog(commands.Cog):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
+            
+            if user.get("blackbox_api_key_plaintext") != blackbox_api_key:
+                embed = create_error_embed(
+                    "API Key incorrect.",
+                    f"Please provide the correct API key.",
+                )
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+            
 
             # Link Discord ID to user
             mongodb_service.link_discord_user(user_id, str(interaction.user.id))
