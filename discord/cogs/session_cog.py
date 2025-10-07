@@ -2,6 +2,7 @@
 Session Management Cog
 Handles session CRUD operations
 """
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -39,7 +40,7 @@ class SessionCog(commands.Cog):
 
         return user, api_key
 
-    def _find_project_by_name(self, projects: list, project_name: str):
+    def _find_project_by_name_or_id(self, projects: list, project_name: str):
         """Helper to find project by name"""
         project = next((p for p in projects if p["name"] == project_name), None)
         if not project:
@@ -49,7 +50,11 @@ class SessionCog(commands.Cog):
     def _find_session_by_name(self, sessions: list, session_name: str):
         """Helper to find session by name"""
         session = next(
-            (s for s in sessions if s.get("name") == session_name or s["session_id"] == session_name),
+            (
+                s
+                for s in sessions
+                if s.get("name") == session_name or s["session_id"] == session_name
+            ),
             None,
         )
         if not session:
@@ -59,9 +64,7 @@ class SessionCog(commands.Cog):
     @app_commands.command(
         name="sessions-list", description="List all sessions in a project"
     )
-    async def sessions_list(
-        self, interaction: discord.Interaction, project_name: str
-    ):
+    async def sessions_list(self, interaction: discord.Interaction, project_name: str):
         """List all sessions"""
         try:
             user, api_key = self._get_user_and_api_key(str(interaction.user.id))
@@ -70,7 +73,7 @@ class SessionCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name)
 
             # Check if project is active
             if project["status"] != "active":
@@ -103,9 +106,7 @@ class SessionCog(commands.Cog):
             except:
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="sessions-create", description="Create a new session"
-    )
+    @app_commands.command(name="sessions-create", description="Create a new session")
     async def sessions_create(
         self,
         interaction: discord.Interaction,
@@ -120,7 +121,7 @@ class SessionCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name)
 
             # Check if project is active
             if project["status"] != "active":
@@ -166,9 +167,7 @@ class SessionCog(commands.Cog):
             except:
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="sessions-delete", description="Delete a session"
-    )
+    @app_commands.command(name="sessions-delete", description="Delete a session")
     async def sessions_delete(
         self,
         interaction: discord.Interaction,
@@ -183,7 +182,7 @@ class SessionCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name)
 
             # Get sessions to find session by name
             result = await self.api_client.get_sessions(api_key, project["id"])

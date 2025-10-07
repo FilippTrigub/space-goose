@@ -2,6 +2,7 @@
 Project Management Cog
 Handles project CRUD operations
 """
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -40,16 +41,22 @@ class ProjectCog(commands.Cog):
 
         return user, api_key
 
-    def _find_project_by_name(self, projects: list, project_name: str):
+    def _find_project_by_name_or_id(self, projects: list, project_name_or_id: str):
         """Helper to find project by name"""
-        project = next((p for p in projects if p["name"] == project_name), None)
-        if not project:
-            raise ValueError(f"Project '{project_name}' not found")
-        return project
+        relevant_projects = [
+            p
+            for p in projects
+            if (p["name"] == project_name_or_id or str(p["id"]) == project_name_or_id)
+        ]
+        if len(relevant_projects) > 1:
+            raise ValueError(
+                f"Multiple projects founds with identifier: {project_name_or_id}"
+            )
+        if len(relevant_projects) < 1:
+            raise ValueError(f"Project '{project_name_or_id}' not found")
+        return relevant_projects[0]
 
-    @app_commands.command(
-        name="projects-list", description="List all your projects"
-    )
+    @app_commands.command(name="projects-list", description="List all your projects")
     async def projects_list(self, interaction: discord.Interaction):
         """List all projects"""
         try:
@@ -73,9 +80,7 @@ class ProjectCog(commands.Cog):
             except:
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="projects-create", description="Create a new project"
-    )
+    @app_commands.command(name="projects-create", description="Create a new project")
     async def projects_create(
         self,
         interaction: discord.Interaction,
@@ -117,11 +122,9 @@ class ProjectCog(commands.Cog):
             except:
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(
-        name="projects-delete", description="Delete a project"
-    )
+    @app_commands.command(name="projects-delete", description="Delete a project")
     async def projects_delete(
-        self, interaction: discord.Interaction, project_name: str
+        self, interaction: discord.Interaction, project_name_or_id: str
     ):
         """Delete a project"""
         try:
@@ -131,18 +134,18 @@ class ProjectCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name_or_id)
 
             # Delete project
             await self.api_client.delete_project(api_key, project["id"])
 
             embed = create_success_embed(
-                "Project Deleted", f"Project **{project_name}** has been deleted."
+                "Project Deleted", f"Project **{project_name_or_id}** has been deleted."
             )
             await interaction.followup.send(embed=embed)
 
             logger.info(
-                f"User {user['user_id']} deleted project {project_name} ({project['id']})"
+                f"User {user['user_id']} deleted project {project_name_or_id} ({project['id']})"
             )
 
         except ValueError as e:
@@ -164,7 +167,7 @@ class ProjectCog(commands.Cog):
         description="Activate a project (may take up to 120 seconds)",
     )
     async def projects_activate(
-        self, interaction: discord.Interaction, project_name: str
+        self, interaction: discord.Interaction, project_name_or_id: str
     ):
         """Activate a project"""
         try:
@@ -174,7 +177,7 @@ class ProjectCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name_or_id)
 
             # Activate project (may take up to 120s)
             result = await self.api_client.activate_project(api_key, project["id"])
@@ -183,13 +186,13 @@ class ProjectCog(commands.Cog):
 
             embed = create_success_embed(
                 "Project Activated",
-                f"Project **{project_name}** is now active!\n\n"
+                f"Project **{project_name_or_id}** is now active!\n\n"
                 f"Endpoint: `{endpoint}`",
             )
             await interaction.followup.send(embed=embed)
 
             logger.info(
-                f"User {user['user_id']} activated project {project_name} ({project['id']})"
+                f"User {user['user_id']} activated project {project_name_or_id} ({project['id']})"
             )
 
         except ValueError as e:
@@ -210,7 +213,7 @@ class ProjectCog(commands.Cog):
         name="projects-deactivate", description="Deactivate a project"
     )
     async def projects_deactivate(
-        self, interaction: discord.Interaction, project_name: str
+        self, interaction: discord.Interaction, project_name_or_id: str
     ):
         """Deactivate a project"""
         try:
@@ -220,19 +223,19 @@ class ProjectCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name_or_id)
 
             # Deactivate project
             await self.api_client.deactivate_project(api_key, project["id"])
 
             embed = create_success_embed(
                 "Project Deactivated",
-                f"Project **{project_name}** has been deactivated.",
+                f"Project **{project_name_or_id}** has been deactivated.",
             )
             await interaction.followup.send(embed=embed)
 
             logger.info(
-                f"User {user['user_id']} deactivated project {project_name} ({project['id']})"
+                f"User {user['user_id']} deactivated project {project_name_or_id} ({project['id']})"
             )
 
         except ValueError as e:
@@ -252,9 +255,7 @@ class ProjectCog(commands.Cog):
     @app_commands.command(
         name="projects-info", description="Get detailed project information"
     )
-    async def projects_info(
-        self, interaction: discord.Interaction, project_name: str
-    ):
+    async def projects_info(self, interaction: discord.Interaction, project_name_or_id: str):
         """Get project info"""
         try:
             user, api_key = self._get_user_and_api_key(str(interaction.user.id))
@@ -263,7 +264,7 @@ class ProjectCog(commands.Cog):
 
             # Find project by name
             projects = await self.api_client.get_projects(api_key)
-            project = self._find_project_by_name(projects, project_name)
+            project = self._find_project_by_name_or_id(projects, project_name_or_id)
 
             embed = create_project_info_embed(project)
             await interaction.followup.send(embed=embed)

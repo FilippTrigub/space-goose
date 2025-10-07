@@ -6,7 +6,7 @@ This document provides an overview of all available Discord slash commands for m
 
 ## 🔐 Authentication Commands
 
-### `/register <user_id>`
+### `/register <user_id> <blackbox_api_key>`
 Link your Discord account to a K8s Manager user account.
 
 **Parameters:**
@@ -14,7 +14,7 @@ Link your Discord account to a K8s Manager user account.
 
 **Example:**
 ```
-/register user1
+/register user1 ***
 ```
 
 ### `/whoami`

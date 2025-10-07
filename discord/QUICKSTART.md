@@ -84,7 +84,7 @@ INFO - Bot is ready!
 In your Discord server:
 
 ```
-1. Type: /register user_123
+1. Type: /register user_123 ***
    (replace user_123 with your K8s Manager user_id)
 
 2. Check: /whoami
