@@ -1,12 +1,17 @@
-![Banner image](https://user-images.githubusercontent.com/10284570/173569848-c624317f-42b1-45a6-ab09-f0ea3c247648.png)
+# How to test blackbox node locally
 
-# n8n-nodes-starter
+1. Install n8n with `npm install n8n -g`
+2. Setup custom nodes support:
+  - Go to `~/.n8n`. 
+  - If there is no `custom` directory, create it.
+  - In `~/.n8n/custom` run `npm init` (init settings are not important)
+3. In the space-goose/n8n-node directory run 
+  - `npm run build`
+  - `npm link`
+4. In the directory `~/.n8n/custom` run
+  - `npm link n8n-nodes-blackbox`
+  - `n8n start`
 
-This repo contains example nodes to help you get started building your own custom integrations for [n8n](https://n8n.io). It includes the node linter and other dependencies.
-
-To make your custom node available to the community, you must create it as an npm package, and [submit it to the npm registry](https://docs.npmjs.com/packages-and-modules/contributing-packages-to-the-registry).
-
-If you would like your node to be available on n8n cloud you can also [submit your node for verification](https://docs.n8n.io/integrations/creating-nodes/deploy/submit-community-nodes/).
 
 ## Prerequisites
 
@@ -20,7 +25,7 @@ You need the following installed on your development machine:
   ```
 * Recommended: follow n8n's guide to [set up your development environment](https://docs.n8n.io/integrations/creating-nodes/build/node-development-environment/).
 
-## Using this starter
+## Using this starter repo to develop the node
 
 These are the basic steps for working with the starter. For detailed guidance on creating and publishing nodes, refer to the [documentation](https://docs.n8n.io/integrations/creating-nodes/).
 
