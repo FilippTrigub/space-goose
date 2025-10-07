@@ -14,7 +14,7 @@ import type {
 	SpaceGooseApiCredentials,
 } from '../interfaces';
 
-const DEFAULT_BASE_URL = 'https://api.spacegoose.ai';
+const DEFAULT_BASE_URL = 'http://localhost:8000';
 const ACTIVATION_POLL_INTERVAL_MS = 5000;
 const ACTIVATION_TIMEOUT_MS = 120_000;
 
