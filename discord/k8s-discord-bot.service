@@ -1,0 +1,28 @@
+[Unit]
+Description=K8s Manager Discord Bot
+After=network.target mongodb.service
+
+[Service]
+Type=simple
+User=filipp
+Group=filipp
+WorkingDirectory=/home/filipp/space-goose/discord
+Environment="PATH=/home/filipp/space-goose/discord/venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Load environment from .env file
+EnvironmentFile=/home/filipp/space-goose/discord/.env
+
+# Run the bot
+ExecStart=/home/filipp/space-goose/discord/venv/bin/python bot.py
+
+# Restart on failure
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=k8s-discord-bot
+
+[Install]
+WantedBy=multi-user.target

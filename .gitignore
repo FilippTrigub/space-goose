@@ -4,3 +4,12 @@
 # Python
 *.pyc
 */dist/** */
+
+# n8n
+n8n_node/node_modules
+n8n_node/.tmp
+n8n_node/tmp
+n8n_node/dist
+n8n_node/npm-debug.log*
+
+# discord

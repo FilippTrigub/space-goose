@@ -701,7 +701,6 @@ async def wait_for_pod_health(
         try:
             async with httpx.AsyncClient(timeout=6.0) as client:
                 health_url = f"http://{target}/api/v1/health"
-                print(f"HEALTH CHECK AT URL: {health_url}")
                 response = await client.get(health_url, headers=headers)
 
                 if response.status_code == 200:
