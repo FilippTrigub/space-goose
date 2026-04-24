@@ -1,6 +1,11 @@
 # Space Goose
 
-Space Goose is a workspace for running and connecting adapted Goose coding environments. It bundles the root Docker Compose setup with Kubernetes orchestration, Discord and n8n integrations, infra helpers, and supporting docs so teams can spin up AI dev environments with less friction.
+Space Goose helps you:
+
+- run an adapted Goose coding environment locally
+- manage Kubernetes-isolated AI agent projects
+- connect Discord and n8n workflows to Goose projects
+- use the supporting infra, scripts, and docs to operate the platform with less friction
 
 ## What’s in this repo
 
