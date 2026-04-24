@@ -1,13 +1,13 @@
 # Space Goose
 
-Space Goose is a workspace for running and connecting remote Goose coding environments. The repository contains the root Docker Compose setup plus several related components for Kubernetes management, Discord automation, n8n integration, infrastructure, and supporting docs.
+Space Goose is a workspace for running and connecting adapted Goose coding environments. It bundles the root Docker Compose setup with Kubernetes orchestration, Discord and n8n integrations, infra helpers, and supporting docs so teams can spin up AI dev environments with less friction.
 
 ## What’s in this repo
 
 - `compose.yml` — root local runtime for the Goose app on `http://localhost:7681`
 - `compose-cloudflare.yml` — optional Cloudflare Tunnel companion for exposing the local app
 - `k8s-manager/` — FastAPI + MCP service for managing Kubernetes-isolated AI agent projects
-- `discord/` — Discord bot that talks to the K8s Manager API
+- `discord/` — Discord bot that connects chat workflows to the K8s Manager API
 - `n8n-node/` — custom n8n node for sending instructions to Space Goose projects
 - `infra/` — Kubernetes manifests and setup helpers
 - `scripts/` — stress-test and automation scripts
@@ -22,6 +22,8 @@ docker compose up
 ```
 
 Then open the app at [http://localhost:7681](http://localhost:7681).
+
+If you want the short version: Space Goose is trying to feel like a Vercel-style platform for Goose-powered environments — fast to launch, easy to connect, and built around the workflows people actually use.
 
 ## Cloudflare Tunnel
 
